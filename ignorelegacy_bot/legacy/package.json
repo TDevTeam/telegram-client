@@ -1,0 +1,21 @@
+{
+  "name": "convo-watch-2",
+  "version": "1.0.0",
+  "dependencies": {
+    "input": "^1.0.1",
+    "node-telegram-bot-api": "^0.61.0",
+    "telegram": "^2.18.26"
+  },
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "start": "node ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
