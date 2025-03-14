@@ -44,6 +44,7 @@ import { useTelegramStore } from "@/context/telegram-store"
 import { JoinButton } from "@/components/join-button"
 import { NotificationStatus } from "@/components/notification-status"
 import { useContextMenu, ContextMenu, createContextMenuItems } from "@/components/context-menu"
+import { SettingsDialog } from "@/components/settings-dialog"
 
 export function ChatView() {
   const {
@@ -74,6 +75,7 @@ export function ChatView() {
     content: string
     sender: string
   } | null>(null)
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
 
   const { contextMenu, showContextMenu, hideContextMenu } = useContextMenu()
 
@@ -225,10 +227,15 @@ export function ChatView() {
                     avatar: activeChat.avatar,
                     status: activeChat.online ? "online" : "offline",
                     type: "private",
+                    bio: activeChat.members?.[0]?.bio || "No bio yet",
+                    phone: activeChat.members?.[0]?.phone || "+1 (555) 123-4567",
+                    username: activeChat.members?.[0]?.username || "@username",
+                    joinDate: "January 2023",
                   }}
                   media={chatMedia}
                   mutualGroups={[]}
                   onClose={() => setShowInfoSheet(false)}
+                  editable={false}
                 />
               ) : (
                 <GroupInfo
@@ -272,7 +279,7 @@ export function ChatView() {
               </TooltipProvider>
             </>
           )}
-          <Button variant="ghost" size="icon" onClick={() => setShowAccountSettingsDialog(true)}>
+          <Button variant="ghost" size="icon" onClick={() => setShowSettingsDialog(true)}>
             <Settings className="h-5 w-5" />
           </Button>
           <DropdownMenu>
@@ -531,6 +538,9 @@ export function ChatView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Settings Dialog */}
+      <SettingsDialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog} account={activeAccount} />
 
       {/* Context Menu */}
       {contextMenu.show && contextMenu.data && (

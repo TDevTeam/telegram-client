@@ -1,25 +1,23 @@
 import type React from "react"
-import type { Metadata } from "next"
-import { TelegramStoreProvider } from "@/context/telegram-store"
-import { ThemeProvider } from "@/components/theme-provider"
 import "@/app/globals.css"
+import { ThemeProvider } from "@/components/theme-provider"
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Multi-Account Telegram Client",
-  description: "A Next.js 15 application for managing multiple Telegram accounts",
+  description: "A Next.js Telegram client with multi-account support",
     generator: 'v0.dev'
 }
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode
-}>) {
+}) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-          <TelegramStoreProvider>{children}</TelegramStoreProvider>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+          {children}
         </ThemeProvider>
       </body>
     </html>

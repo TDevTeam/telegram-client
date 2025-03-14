@@ -4,6 +4,7 @@ import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 
 // Types
+// Add bio field to AccountType
 export type AccountType = {
   id: string
   name: string
@@ -13,11 +14,29 @@ export type AccountType = {
   muted: boolean
   active: boolean
   phone: string
+  bio?: string
+  darkMode?: boolean
   notificationSettings?: {
     sound: boolean
     preview: boolean
     showBadge: boolean
   }
+  language?: string
+  privacySettings?: {
+    lastSeen: "everybody" | "contacts" | "nobody"
+    profilePhoto: "everybody" | "contacts" | "nobody"
+    calls: "everybody" | "contacts" | "nobody"
+    forwardedMessages: "everybody" | "contacts" | "nobody"
+  }
+  sessions?: Array<{
+    id: string
+    deviceName: string
+    appName: string
+    ip: string
+    location: string
+    lastActive: string
+    current: boolean
+  }>
 }
 
 export type ChatType = {
@@ -39,6 +58,8 @@ export type ChatType = {
   createdAt?: string
   members?: MemberType[]
   accountId?: string // To track which account this chat belongs to
+  privacy?: "public" | "private" // Whether anyone can join or approval is needed
+  joinStatus?: "member" | "pending" | "none" // User's status in the group
 }
 
 export type MessageType = {
@@ -92,6 +113,7 @@ export type ProfileType = {
 }
 
 // Initial data
+// Update initial accounts with bio
 const initialAccounts: AccountType[] = [
   {
     id: "1",
@@ -102,6 +124,7 @@ const initialAccounts: AccountType[] = [
     muted: false,
     active: true,
     phone: "+1 (555) 123-4567",
+    bio: "Software developer from San Francisco. Love coding and hiking.",
     notificationSettings: {
       sound: true,
       preview: true,
@@ -117,6 +140,7 @@ const initialAccounts: AccountType[] = [
     muted: true,
     active: false,
     phone: "+1 (555) 987-6543",
+    bio: "UX Designer. Coffee enthusiast. Always looking for new challenges.",
     notificationSettings: {
       sound: false,
       preview: false,
@@ -132,11 +156,111 @@ const initialAccounts: AccountType[] = [
     muted: false,
     active: false,
     phone: "+1 (555) 456-7890",
+    bio: "Photographer and traveler. Currently exploring Asia.",
     notificationSettings: {
       sound: true,
       preview: true,
       showBadge: false,
     },
+  },
+]
+
+// Public groups that can be discovered and joined
+const publicGroups: ChatType[] = [
+  {
+    id: "public-1",
+    name: "JavaScript Developers",
+    lastMessage: "Check out this new framework!",
+    time: "2 hours ago",
+    unread: 0,
+    avatar: "/placeholder.svg?height=40&width=40",
+    online: false,
+    type: "group",
+    isAdmin: false,
+    memberCount: 1250,
+    muted: false,
+    pinned: false,
+    description: "A community for JavaScript developers to share knowledge and resources.",
+    createdBy: "JavaScript Community",
+    createdAt: "January 2022",
+    privacy: "public",
+    joinStatus: "none",
+  },
+  {
+    id: "public-2",
+    name: "UI/UX Design",
+    lastMessage: "New design trends for 2025",
+    time: "Yesterday",
+    unread: 0,
+    avatar: "/placeholder.svg?height=40&width=40",
+    online: false,
+    type: "group",
+    isAdmin: false,
+    memberCount: 3420,
+    muted: false,
+    pinned: false,
+    description: "Discuss the latest UI/UX design trends and share your work.",
+    createdBy: "Design Community",
+    createdAt: "March 2022",
+    privacy: "public",
+    joinStatus: "none",
+  },
+  {
+    id: "public-3",
+    name: "Tech News",
+    lastMessage: "Latest updates on AI and machine learning",
+    time: "3 days ago",
+    unread: 0,
+    avatar: "/placeholder.svg?height=40&width=40",
+    online: false,
+    type: "channel",
+    isAdmin: false,
+    subscriberCount: 5600,
+    muted: false,
+    pinned: false,
+    description: "Stay updated with the latest tech news and trends.",
+    createdBy: "Tech News Network",
+    createdAt: "December 2021",
+    privacy: "public",
+    joinStatus: "none",
+  },
+  {
+    id: "private-1",
+    name: "Exclusive Developers",
+    lastMessage: "Discussion about new project",
+    time: "1 day ago",
+    unread: 0,
+    avatar: "/placeholder.svg?height=40&width=40",
+    online: false,
+    type: "group",
+    isAdmin: false,
+    memberCount: 120,
+    muted: false,
+    pinned: false,
+    description: "A private group for experienced developers. Approval required to join.",
+    createdBy: "Senior Dev Team",
+    createdAt: "April 2023",
+    privacy: "private",
+    joinStatus: "none",
+  },
+  {
+    id: "private-2",
+    name: "Product Managers",
+    lastMessage: "Roadmap planning discussion",
+    time: "4 hours ago",
+    unread: 0,
+    avatar: "/placeholder.svg?height=40&width=40",
+    online: false,
+    type: "group",
+    isAdmin: false,
+    memberCount: 85,
+    muted: false,
+    pinned: false,
+    description: "A group for product managers to share insights and strategies.",
+    createdBy: "PM Community",
+    createdAt: "June 2023",
+    privacy: "private",
+    joinStatus: "none",
   },
 ]
 
@@ -181,6 +305,8 @@ const initialChats: ChatType[] = [
     createdBy: "Alex Johnson",
     createdAt: "January 2023",
     accountId: "1",
+    privacy: "public",
+    joinStatus: "member",
     members: [
       {
         id: "1",
@@ -260,6 +386,8 @@ const initialChats: ChatType[] = [
     createdBy: "Sarah Miller",
     createdAt: "March 2023",
     accountId: "1",
+    privacy: "private",
+    joinStatus: "member",
     members: [
       {
         id: "2",
@@ -329,6 +457,8 @@ const initialChats: ChatType[] = [
     createdBy: "Alex Johnson",
     createdAt: "December 2022",
     accountId: "1",
+    privacy: "public",
+    joinStatus: "member",
     members: [
       {
         id: "1",
@@ -357,6 +487,8 @@ const initialChats: ChatType[] = [
     createdBy: "Emma Thompson",
     createdAt: "February 2023",
     accountId: "1",
+    privacy: "public",
+    joinStatus: "member",
     members: [
       {
         id: "c1",
@@ -394,6 +526,8 @@ const initialChats: ChatType[] = [
     createdBy: "Sarah Miller",
     createdAt: "April 2023",
     accountId: "2",
+    privacy: "private",
+    joinStatus: "member",
     members: [
       {
         id: "2",
@@ -430,6 +564,29 @@ const initialChats: ChatType[] = [
     createdBy: "Dad",
     createdAt: "January 2022",
     accountId: "2",
+    privacy: "private",
+    joinStatus: "member",
+  },
+  // Pending join request
+  {
+    id: "private-3",
+    name: "Senior Developers",
+    lastMessage: "",
+    time: "1 day ago",
+    unread: 0,
+    avatar: "/placeholder.svg?height=40&width=40",
+    online: false,
+    type: "group",
+    isAdmin: false,
+    memberCount: 75,
+    muted: false,
+    pinned: false,
+    description: "A group for senior developers to discuss advanced topics.",
+    createdBy: "Tech Leaders",
+    createdAt: "May 2023",
+    accountId: "1",
+    privacy: "private",
+    joinStatus: "pending",
   },
 ]
 
@@ -605,6 +762,18 @@ const initialMessages: Record<string, MessageType[]> = {
       isRead: true,
     },
   ],
+  "private-3": [
+    {
+      id: "private-3-1",
+      sender: "System",
+      senderId: "system",
+      content: "You've requested to join this group. Waiting for admin approval.",
+      time: "1 day ago",
+      avatar: "/placeholder.svg?height=40&width=40",
+      reactions: {},
+      isRead: true,
+    },
+  ],
 }
 
 // Media items for each chat
@@ -656,6 +825,7 @@ type TelegramStoreContextType = {
   messages: Record<string, MessageType[]>
   mediaItems: Record<string, MediaItemType[]>
   activeMember: MemberType | null
+  publicGroups: ChatType[]
 
   // Actions
   setActiveAccount: (accountId: string) => void
@@ -680,6 +850,10 @@ type TelegramStoreContextType = {
   getFilteredChats: () => ChatType[]
   markMessageAsRead: (chatId: string, messageId: string) => void
   markAllMessagesAsRead: (chatId: string) => void
+  requestJoinGroup: (groupId: string) => void
+  acceptJoinRequest: (groupId: string, memberId: string) => void
+  rejectJoinRequest: (groupId: string, memberId: string) => void
+  getPendingJoinRequests: () => ChatType[]
 }
 
 // Create context
@@ -695,6 +869,7 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
   const [messages, setMessages] = useState<Record<string, MessageType[]>>(initialMessages)
   const [mediaItems, setMediaItems] = useState<Record<string, MediaItemType[]>>(initialMediaItems)
   const [activeMember, setActiveMemberState] = useState<MemberType | null>(null)
+  const [availablePublicGroups, setAvailablePublicGroups] = useState<ChatType[]>(publicGroups)
 
   // Load data from localStorage on mount
   useEffect(() => {
@@ -702,11 +877,13 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
     const storedChats = localStorage.getItem("telegram-chats")
     const storedMessages = localStorage.getItem("telegram-messages")
     const storedMediaItems = localStorage.getItem("telegram-media-items")
+    const storedPublicGroups = localStorage.getItem("telegram-public-groups")
 
     if (storedAccounts) setAccounts(JSON.parse(storedAccounts))
     if (storedChats) setChats(JSON.parse(storedChats))
     if (storedMessages) setMessages(JSON.parse(storedMessages))
     if (storedMediaItems) setMediaItems(JSON.parse(storedMediaItems))
+    if (storedPublicGroups) setAvailablePublicGroups(JSON.parse(storedPublicGroups))
   }, [])
 
   // Save data to localStorage when it changes
@@ -715,12 +892,15 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
     localStorage.setItem("telegram-chats", JSON.stringify(chats))
     localStorage.setItem("telegram-messages", JSON.stringify(messages))
     localStorage.setItem("telegram-media-items", JSON.stringify(mediaItems))
-  }, [accounts, chats, messages, mediaItems])
+    localStorage.setItem("telegram-public-groups", JSON.stringify(availablePublicGroups))
+  }, [accounts, chats, messages, mediaItems, availablePublicGroups])
 
   // Actions
+  // Update the setActiveAccount function to properly sync all UI components
   const setActiveAccount = (accountId: string) => {
     const account = accounts.find((a) => a.id === accountId)
     if (account) {
+      // Update all accounts' active status
       setAccounts(
         accounts.map((a) => ({
           ...a,
@@ -728,7 +908,22 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
         })),
       )
       setActiveAccountState(account)
-      setActiveChatState(null) // Reset active chat when switching accounts
+
+      // Reset active chat when switching accounts
+      setActiveChatState(null)
+
+      // Apply account-specific settings
+      if (account.notificationSettings) {
+        // Apply notification settings
+        console.log("Applied notification settings for account:", account.id)
+      }
+
+      // Apply theme settings if account has them
+      if (account.darkMode) {
+        document.documentElement.classList.add("dark")
+      } else {
+        document.documentElement.classList.remove("dark")
+      }
     }
   }
 
@@ -1047,6 +1242,104 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
     setChats(chats.map((chat) => (chat.id === chatId ? { ...chat, unread: 0 } : chat)))
   }
 
+  const requestJoinGroup = (groupId: string) => {
+    // For public groups, join immediately
+    const group = availablePublicGroups.find((g) => g.id === groupId)
+
+    if (!group) return
+
+    if (group.privacy === "public") {
+      // Add to user's chats
+      const newChat = {
+        ...group,
+        accountId: activeAccount.id,
+        joinStatus: "member" as const,
+      }
+      setChats([newChat, ...chats])
+
+      // Initialize empty messages array
+      setMessages({
+        ...messages,
+        [groupId]: [
+          {
+            id: `${groupId}-welcome`,
+            sender: "System",
+            senderId: "system",
+            content: `Welcome to ${group.name}!`,
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            avatar: "/placeholder.svg?height=40&width=40",
+            reactions: {},
+            isRead: true,
+          },
+        ],
+      })
+
+      // Remove from available groups
+      setAvailablePublicGroups(
+        availablePublicGroups.map((g) => (g.id === groupId ? { ...g, joinStatus: "member" } : g)),
+      )
+    } else {
+      // For private groups, set status to pending
+      const newChat = {
+        ...group,
+        accountId: activeAccount.id,
+        joinStatus: "pending" as const,
+      }
+      setChats([newChat, ...chats])
+
+      // Add pending message
+      setMessages({
+        ...messages,
+        [groupId]: [
+          {
+            id: `${groupId}-pending`,
+            sender: "System",
+            senderId: "system",
+            content: `You've requested to join this group. Waiting for admin approval.`,
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            avatar: "/placeholder.svg?height=40&width=40",
+            reactions: {},
+            isRead: true,
+          },
+        ],
+      })
+
+      // Update status in available groups
+      setAvailablePublicGroups(
+        availablePublicGroups.map((g) => (g.id === groupId ? { ...g, joinStatus: "pending" } : g)),
+      )
+    }
+  }
+
+  const acceptJoinRequest = (groupId: string, memberId: string) => {
+    // Update chat join status
+    setChats(chats.map((chat) => (chat.id === groupId ? { ...chat, joinStatus: "member" } : chat)))
+
+    // Add confirmation message
+    addMessage(groupId, {
+      sender: "System",
+      senderId: "system",
+      content: "Your join request has been accepted. Welcome to the group!",
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      avatar: "/placeholder.svg?height=40&width=40",
+      reactions: {},
+      isRead: true,
+    })
+  }
+
+  const rejectJoinRequest = (groupId: string, memberId: string) => {
+    // Remove chat from user's list
+    removeChat(groupId)
+
+    // Update status in available groups
+    setAvailablePublicGroups(availablePublicGroups.map((g) => (g.id === groupId ? { ...g, joinStatus: "none" } : g)))
+  }
+
+  const getPendingJoinRequests = () => {
+    // Get all chats with pending join status
+    return chats.filter((chat) => chat.joinStatus === "pending" && chat.accountId === activeAccount.id)
+  }
+
   const value = {
     accounts,
     activeAccount,
@@ -1055,6 +1348,7 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
     messages,
     mediaItems,
     activeMember,
+    publicGroups: availablePublicGroups,
     setActiveAccount,
     setActiveChat,
     setActiveMember,
@@ -1077,6 +1371,10 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
     getFilteredChats,
     markMessageAsRead,
     markAllMessagesAsRead,
+    requestJoinGroup,
+    acceptJoinRequest,
+    rejectJoinRequest,
+    getPendingJoinRequests,
   }
 
   return <TelegramStoreContext.Provider value={value}>{children}</TelegramStoreContext.Provider>

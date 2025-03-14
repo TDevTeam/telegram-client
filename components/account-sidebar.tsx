@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { BellOff, LogOut, Plus, Settings, Trash2, Edit, Check } from "lucide-react"
+import { useState, useEffect } from "react"
+import { BellOff, LogOut, Plus, Settings, Trash2, Edit, Check, User } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -18,43 +18,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-
-// Mock accounts data
-const accounts = [
-  {
-    id: "1",
-    name: "Alex Johnson",
-    username: "@alexj",
-    avatar: "/placeholder.svg?height=40&width=40",
-    unreadCount: 5,
-    muted: false,
-    active: true,
-    phone: "+1 (555) 123-4567",
-  },
-  {
-    id: "2",
-    name: "Sarah Miller",
-    username: "@sarahm",
-    avatar: "/placeholder.svg?height=40&width=40",
-    unreadCount: 12,
-    muted: true,
-    active: false,
-    phone: "+1 (555) 987-6543",
-  },
-  {
-    id: "3",
-    name: "David Wilson",
-    username: "@davidw",
-    avatar: "/placeholder.svg?height=40&width=40",
-    unreadCount: 0,
-    muted: false,
-    active: false,
-    phone: "+1 (555) 456-7890",
-  },
-]
+import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { AccountProfile } from "@/components/account-profile"
+import { useTelegramStore } from "@/context/telegram-store"
 
 export function AccountSidebar() {
-  const [activeAccount, setActiveAccount] = useState(accounts[0])
+  const { accounts, activeAccount, setActiveAccount } = useTelegramStore()
   const [showAccountsDialog, setShowAccountsDialog] = useState(false)
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false)
   const [editingAccount, setEditingAccount] = useState<(typeof accounts)[0] | null>(null)
@@ -62,6 +31,7 @@ export function AccountSidebar() {
   const [phoneNumber, setPhoneNumber] = useState("")
   const [verificationCode, setVerificationCode] = useState("")
   const [showVerificationInput, setShowVerificationInput] = useState(false)
+  const [showProfileSheet, setShowProfileSheet] = useState(false)
 
   const handleAddAccount = () => {
     setShowAddAccountDialog(true)
@@ -94,14 +64,20 @@ export function AccountSidebar() {
 
   const handleAccountClick = (account: (typeof accounts)[0]) => {
     // Set the clicked account as active
-    setActiveAccount(account)
-
-    // In a real app, this would switch the active account
-    const updatedAccounts = accounts.map((acc) => ({
-      ...acc,
-      active: acc.id === account.id,
-    }))
+    setActiveAccount(account.id)
   }
+
+  const handleViewProfile = () => {
+    setShowProfileSheet(true)
+  }
+
+  useEffect(() => {
+    // This ensures the sidebar reflects the current active account
+    const activeAcc = accounts.find((acc) => acc.active)
+    if (activeAcc && activeAcc.id !== activeAccount.id) {
+      setActiveAccount(activeAcc.id)
+    }
+  }, [accounts, activeAccount.id, setActiveAccount])
 
   return (
     <>
@@ -153,6 +129,16 @@ export function AccountSidebar() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full" onClick={handleViewProfile}>
+                  <User className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">View Profile</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -177,6 +163,13 @@ export function AccountSidebar() {
           </TooltipProvider>
         </div>
       </div>
+
+      {/* Profile Sheet */}
+      <Sheet open={showProfileSheet} onOpenChange={setShowProfileSheet}>
+        <SheetContent side="left" className="p-0 w-[350px] sm:w-[400px]">
+          <AccountProfile account={activeAccount} onClose={() => setShowProfileSheet(false)} />
+        </SheetContent>
+      </Sheet>
 
       {/* Manage Accounts Dialog */}
       <Dialog open={showAccountsDialog} onOpenChange={setShowAccountsDialog}>

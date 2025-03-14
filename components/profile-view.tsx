@@ -1,11 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { X, LinkIcon, Image, Users, Bell, BellOff, UserPlus, UserMinus, File } from "lucide-react"
+import { X, LinkIcon, Image, Users, Bell, BellOff, UserPlus, UserMinus, File, Edit } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
+import { ProfileEditor } from "@/components/profile-editor"
+import { useTelegramStore } from "@/context/telegram-store"
 
 interface ProfileViewProps {
   profile: {
@@ -35,11 +37,21 @@ interface ProfileViewProps {
     avatar: string
   }>
   onClose: () => void
+  editable?: boolean
 }
 
-export function ProfileView({ profile, media, mutualGroups, onClose }: ProfileViewProps) {
+export function ProfileView({ profile, media, mutualGroups, onClose, editable = false }: ProfileViewProps) {
   const [isMuted, setIsMuted] = useState(false)
   const [isContact, setIsContact] = useState(true)
+  const [isEditing, setIsEditing] = useState(false)
+  const { accounts } = useTelegramStore()
+
+  // Find the account if this is a user profile
+  const account = accounts.find((a) => a.username === profile.username)
+
+  if (isEditing && account) {
+    return <ProfileEditor account={account} onSave={() => setIsEditing(false)} onCancel={() => setIsEditing(false)} />
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -58,17 +70,27 @@ export function ProfileView({ profile, media, mutualGroups, onClose }: ProfileVi
         <div className="text-center">
           <h3 className="text-xl font-bold">{profile.name}</h3>
           {profile.status && <p className="text-sm text-muted-foreground">{profile.status}</p>}
+          {profile.username && <p className="text-sm text-muted-foreground">{profile.username}</p>}
         </div>
 
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setIsMuted(!isMuted)}>
-            {isMuted ? <BellOff className="mr-2 h-4 w-4" /> : <Bell className="mr-2 h-4 w-4" />}
-            {isMuted ? "Unmute" : "Mute"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setIsContact(!isContact)}>
-            {isContact ? <UserMinus className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
-            {isContact ? "Remove" : "Add"}
-          </Button>
+          {editable ? (
+            <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
+              <Edit className="mr-2 h-4 w-4" />
+              Edit Profile
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setIsMuted(!isMuted)}>
+                {isMuted ? <BellOff className="mr-2 h-4 w-4" /> : <Bell className="mr-2 h-4 w-4" />}
+                {isMuted ? "Unmute" : "Mute"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setIsContact(!isContact)}>
+                {isContact ? <UserMinus className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                {isContact ? "Remove" : "Add"}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
