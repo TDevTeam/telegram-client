@@ -28,9 +28,12 @@ export async function getDialogs(activeClients: ClientStore, accountId: string, 
         } else {
           // For private chats, check if user is online
           try {
-            const entity = await client.getEntity(dialog.id)
-            if (entity.className === "User") {
-              online = entity.status?.className === "UserStatusOnline"
+            const entityId = dialog.id ? dialog.id.toString() : ""
+            if (entityId) {
+              const entity = await client.getEntity(entityId)
+              if (entity && "status" in entity) {
+                online = entity.status?._ === "userStatusOnline"
+              }
             }
           } catch (err) {
             console.error("Error getting entity:", err)
@@ -41,7 +44,9 @@ export async function getDialogs(activeClients: ClientStore, accountId: string, 
         try {
           const settings = await client.invoke(
             new Api.account.GetNotifySettings({
-              peer: await client.getInputEntity(dialog.id),
+              peer: new Api.InputNotifyPeer({
+                peer: await client.getInputPeerById(dialog.id || 0),
+              }),
             }),
           )
           muted = settings.muteUntil !== 0
@@ -51,17 +56,17 @@ export async function getDialogs(activeClients: ClientStore, accountId: string, 
 
         // Try to get a profile photo
         try {
-          const entity = await client.getEntity(dialog.id)
-          if (entity.photo) {
-            try {
-              const photo = await client.downloadProfilePhoto(entity)
-              if (photo) {
+          const entityId = dialog.id ? dialog.id.toString() : ""
+          if (entityId) {
+            const entity = await client.getEntity(entityId)
+            if (entity && "photo" in entity && entity.photo) {
+              try {
                 // In a real implementation, you'd save this to a file and serve it
                 // For now, we'll use a placeholder
                 avatar = "/placeholder.svg?height=40&width=40"
+              } catch (err) {
+                console.error("Error downloading profile photo:", err)
               }
-            } catch (err) {
-              console.error("Error downloading profile photo:", err)
             }
           }
         } catch (err) {
@@ -69,7 +74,7 @@ export async function getDialogs(activeClients: ClientStore, accountId: string, 
         }
 
         return {
-          id: dialog.id.toString(),
+          id: dialog.id ? dialog.id.toString() : `unknown-${Date.now()}`,
           name: dialog.title,
           lastMessage: dialog.message?.message || "",
           time: dialog.message?.date ? new Date(dialog.message.date * 1000).toLocaleString() : "",
@@ -128,7 +133,9 @@ export async function togglePin(activeClients: ClientStore, accountId: string, c
   try {
     const result = await client.invoke(
       new Api.messages.ToggleDialogPin({
-        peer: await client.getInputEntity(chatId),
+        peer: new Api.InputDialogPeer({
+          peer: await client.getInputPeerById(Number(chatId)),
+        }),
         pinned: pin,
       }),
     )

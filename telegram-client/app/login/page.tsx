@@ -25,12 +25,14 @@ export default function LoginPage() {
     const connectWebSocket = async () => {
       try {
         setConnectionStatus("connecting")
+        console.log("Connecting to WebSocket...")
         await wsClient.connect(activeAccount.id)
         setConnectionStatus("connected")
+        console.log("WebSocket connected")
       } catch (error) {
         console.error("Error connecting to WebSocket:", error)
         setConnectionStatus("error")
-        setError("Failed to connect to server")
+        setError("Failed to connect to server. Please try again.")
       }
     }
 
@@ -38,6 +40,7 @@ export default function LoginPage() {
 
     // Set up WebSocket event handlers
     const handleAuthSuccess = (data: any) => {
+      console.log("Auth success:", data)
       if (data.hasSession) {
         // We have a saved session, update account and redirect to home
         updateAccount(activeAccount.id, {
@@ -51,7 +54,8 @@ export default function LoginPage() {
     }
 
     const handleError = (data: any) => {
-      setError(data.error)
+      console.error("WebSocket error:", data)
+      setError(data.error || "An unknown error occurred")
     }
 
     wsClient.on("auth_success", handleAuthSuccess)

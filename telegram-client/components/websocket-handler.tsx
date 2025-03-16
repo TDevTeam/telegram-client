@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 import { useTelegramStore } from "@/context/telegram-store"
-import wsClient from "@/lib/websocket-client"
+import wsClient from "@/lib/websocket"
 
 // This component handles WebSocket connections to receive real-time updates from the backend
 export function WebSocketHandler() {

@@ -61,14 +61,14 @@
     "bufferutil": "latest",
     "utf-8-validate": "latest",
     "telegram": "latest",
-    "ws": "latest",
-    "fs": "latest",
-    "path": "latest",
     "express": "latest",
     "http": "latest",
+    "ws": "latest",
     "cors": "latest",
     "dotenv": "latest",
-    "body-parser": "latest"
+    "body-parser": "latest",
+    "fs": "latest",
+    "path": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",

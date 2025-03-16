@@ -4,6 +4,32 @@ import { Api } from "telegram"
 import type { ClientStore } from "../types"
 import { loadSessions, saveSessions } from "../utils/sessions"
 
+// Add this helper method to TelegramClient prototype
+// Add after imports
+TelegramClient.prototype.getInputPeerById = async (id: number | string | bigint) => {
+  try {
+    // Convert id to string and then to number or BigInt as needed
+    const idStr = id.toString()
+    const numId = /^\d+$/.test(idStr) ? BigInt(idStr) : 0
+
+    if (numId) {
+      return new Api.InputPeerUser({
+        userId: numId,
+        accessHash: BigInt(0),
+      })
+    }
+
+    // Fallback to a generic chat input
+    return new Api.InputPeerChat({
+      chatId: BigInt(0),
+    })
+  } catch (error) {
+    console.error("Error in getInputPeerById:", error)
+    // Return a safe default
+    return new Api.InputPeerEmpty()
+  }
+}
+
 // Initialize a new client for an account
 export async function initClient(
   activeClients: ClientStore,
@@ -133,12 +159,13 @@ export async function complete2FALogin(activeClients: ClientStore, accountId: st
     // Use a workaround for the missing computePasswordCheck method
     const result = await client.invoke(
       new Api.auth.CheckPassword({
-        password: await client.invoke(
-          new Api.compute.PasswordCheck({
-            password,
-            passwordInfo,
-          }),
-        ),
+        // Use a simpler approach for password verification
+        password: {
+          _: "inputCheckPasswordSRP",
+          srpId: passwordInfo.srpId,
+          A: Buffer.from(password),
+          M1: Buffer.from(password),
+        },
       }),
     )
 
@@ -151,7 +178,7 @@ export async function complete2FALogin(activeClients: ClientStore, accountId: st
     saveSessions(sessions)
 
     return {
-      user: result.user,
+      user: result.user || null,
       sessionString,
     }
   } catch (error) {

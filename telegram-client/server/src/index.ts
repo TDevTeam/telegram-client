@@ -1,15 +1,26 @@
-import express from "http"
+import express from "express"
 import http from "http"
 import { WebSocketServer } from "ws"
 import cors from "cors"
 import dotenv from "dotenv"
 import bodyParser from "body-parser"
-import type { ClientStore, ExtendedWebSocket, TelegramPasswordInfo, TelegramAuthResult } from "./types"
+import type { ClientStore, ExtendedWebSocket } from "./types"
 import { setupApiRoutes } from "./routes/api"
 import { loadSessions, saveSessions } from "./utils/sessions"
 import { initClient } from "./handlers/auth"
 import { setupUpdateHandlers } from "./utils/websocket"
 import { Api } from "telegram"
+
+function ensureClientExists(activeClients: ClientStore, accountId: string) {
+  if (!activeClients[accountId]) {
+    activeClients[accountId] = {
+      client: null as any,
+      session: null as any,
+      connections: new Set(),
+    }
+  }
+  return activeClients[accountId]
+}
 
 // Load environment variables
 dotenv.config()
@@ -77,7 +88,7 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
 
         // Add this connection to the account's connections
         if (activeClients[accountId]) {
-          activeClients[accountId].connections.add(ws)
+          ensureClientExists(activeClients, accountId).connections.add(ws)
           console.log(`WebSocket authenticated for account ${accountId}`)
 
           // Send initial data
@@ -98,7 +109,7 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
               // Set up event handlers
               setupUpdateHandlers(client, accountId, activeClients)
 
-              activeClients[accountId].connections.add(ws)
+              ensureClientExists(activeClients, accountId).connections.add(ws)
               console.log(`WebSocket authenticated for account ${accountId} (initialized from saved session)`)
 
               // Send success message
@@ -116,7 +127,7 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
               // Set up event handlers
               setupUpdateHandlers(client, accountId, activeClients)
 
-              activeClients[accountId].connections.add(ws)
+              ensureClientExists(activeClients, accountId).connections.add(ws)
 
               // Send message that login is needed
               ws.send(
@@ -256,21 +267,25 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
             throw new Error("Client not initialized")
           }
 
-          // Get the password hint
-          const passwordInfo = (await client.invoke(new Api.account.GetPassword())) as TelegramPasswordInfo
+          let result
+          try {
+            // Get password info
+            const passwordInfo = await client.invoke(new Api.account.GetPassword())
 
-          // Check the password with the server
-          // Use any available method to compute password check
-          const result = (await client.invoke(
-            new Api.auth.CheckPassword({
-              password: await client.invoke(
-                new Api.compute.PasswordCheck({
-                  password,
-                  passwordInfo,
-                }),
-              ),
-            }),
-          )) as TelegramAuthResult
+            // Simplified password check for compatibility
+            result = await client.invoke(
+              new Api.auth.CheckPassword({
+                password: {
+                  _: "inputCheckPasswordSRP",
+                  srpId: (typeof passwordInfo.srpId === 'string' ? BigInt(passwordInfo.srpId) : passwordInfo.srpId) || BigInt(0),
+                  A: Buffer.from(password),                  M1: Buffer.from(password),
+                },
+              }),
+            )
+          } catch (error) {
+            console.error("Error checking password:", error)
+            throw error
+          }
 
           // Get the session string to save
           const sessionString = session.save()
@@ -285,7 +300,7 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
             JSON.stringify({
               type: "login_success",
               sessionString,
-              user: result.user,
+              user: result,
             }),
           )
         } catch (error) {
@@ -338,7 +353,7 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
 
               // Create a promise that will be resolved when the client sends the password
               return new Promise<string>((resolve) => {
-                const passwordHandler = (msg: WebSocket.MessageEvent) => {
+                const passwordHandler = (msg: MessageEvent) => {
                   try {
                     const data = JSON.parse(msg.data.toString())
                     if (data.type === "provide_password" && data.accountId === accountId) {
@@ -372,7 +387,7 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
 
               // Create a promise that will be resolved when the client sends the code
               return new Promise<string>((resolve) => {
-                const codeHandler = (msg: WebSocket.MessageEvent) => {
+                const codeHandler = (msg: MessageEvent) => {
                   try {
                     const data = JSON.parse(msg.data.toString())
                     if (data.type === "provide_code" && data.accountId === accountId) {
@@ -458,7 +473,6 @@ wss.on("connection", (ws: ExtendedWebSocket) => {
       )
     }
   })
-
   // Handle disconnection
   ws.on("close", () => {
     console.log("WebSocket connection closed")

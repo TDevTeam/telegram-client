@@ -21,8 +21,8 @@ export async function getMessages(activeClients: ClientStore, accountId: string,
         // Try to get sender photo
         if (message.fromId) {
           try {
-            const entity = await client.getEntity(message.fromId)
-            if (entity.photo) {
+            const entity = await client.getEntity(message.fromId.toString())
+            if (entity && "photo" in entity && entity.photo) {
               // In a real implementation, you'd save this to a file and serve it
               // For now, we'll use a placeholder
               avatar = "/placeholder.svg?height=40&width=40"
@@ -34,16 +34,22 @@ export async function getMessages(activeClients: ClientStore, accountId: string,
 
         // Try to get reactions
         if (message.reactions) {
-          reactions = message.reactions.results.reduce((acc, reaction) => {
-            const emoji = reaction.reaction.emoticon
-            acc[emoji] = (acc[emoji] || 0) + reaction.count
-            return acc
-          }, {})
+          try {
+            const reactionsList = message.reactions.results || []
+            reactions = reactionsList.reduce((acc: Record<string, number>, reaction: any) => {
+              const emoji =
+                reaction.reaction && reaction.reaction._ === "reactionEmoji" ? reaction.reaction.emoticon : "👍"
+              acc[emoji] = (acc[emoji] || 0) + (reaction.count || 1)
+              return acc
+            }, {})
+          } catch (err) {
+            console.error("Error processing reactions:", err)
+          }
         }
 
         return {
           id: message.id.toString(),
-          sender: message.sender?.firstName || "Unknown",
+          sender: message.sender && "firstName" in message.sender ? message.sender.firstName : "Unknown",
           senderId: message.senderId?.toString() || "",
           content: message.message || "",
           time: message.date
@@ -51,10 +57,16 @@ export async function getMessages(activeClients: ClientStore, accountId: string,
             : "",
           avatar,
           reactions,
-          isRead: !message.media?.document?.attributes.some((attr) => attr.className === "DocumentAttributeUnread"),
+          isRead: !(
+            message.media &&
+            "document" in message.media &&
+            message.media.document &&
+            message.media.document.attributes &&
+            message.media.document.attributes.some((attr: any) => attr.className === "DocumentAttributeUnread")
+          ),
           replyTo: message.replyTo
             ? {
-                id: message.replyTo.replyToMsgId.toString(),
+                id: message.replyTo.replyToMsgId ? message.replyTo.replyToMsgId.toString() : "0",
                 content: "", // Need to fetch the actual message content separately
                 sender: "", // Need to fetch the sender info separately
               }

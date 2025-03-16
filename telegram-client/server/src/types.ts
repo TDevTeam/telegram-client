@@ -92,7 +92,11 @@ export interface TelegramPasswordInfo {
 }
 
 export interface TelegramAuthResult {
-  user: TelegramUser
+  user?: TelegramUser
   [key: string]: any
+}
+
+export interface ExtendedTelegramClient extends TelegramClient {
+  getInputPeerById(id: number | string | bigint): Promise<any>
 }
 

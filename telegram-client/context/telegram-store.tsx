@@ -3,8 +3,9 @@
 import type React from "react"
 import { createContext, useContext, useState, useEffect, useCallback } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import * as apiClient from "@/lib/api-client"
-import wsClient from "@/lib/websocket-client"
+// Update the import path
+import * as apiClient from "@/lib/api"
+import wsClient from "@/lib/websocket"
 
 // Types
 export type AccountType = {
@@ -449,6 +450,7 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
     setError(null)
 
     try {
+      console.log(`Initializing client for account ${accountId} with API ID ${apiId}`)
       const response = await apiClient.initializeClient(accountId, apiId, apiHash)
 
       if (typeof response === "object" && response !== null && "success" in response && response.success) {
@@ -467,9 +469,14 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
         })
 
         if (response.hasSession) {
+          console.log("Session found, fetching chats")
           // If we already have a session, fetch data
           await fetchChats()
+        } else {
+          console.log("No session found, login required")
         }
+
+        return true
       } else {
         throw new Error(
           typeof response === "object" && response !== null && "error" in response
@@ -479,8 +486,8 @@ export function TelegramStoreProvider({ children }: { children: React.ReactNode 
       }
     } catch (error) {
       console.error("Error initializing client:", error)
-      setError(`Failed to initialize Telegram client: ${error.message}`)
-      throw error
+      setError(`Failed to initialize Telegram client: ${error instanceof Error ? error.message : String(error)}`)
+      return false
     } finally {
       setIsLoading(false)
     }

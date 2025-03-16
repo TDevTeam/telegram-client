@@ -36,69 +36,33 @@ export function LoginDialog({ accountId, onSuccess, onCancel }: LoginDialogProps
   useEffect(() => {
     // Set up WebSocket event handlers for login flow
     const handleCodeSent = (data: any) => {
+      console.log("Login code sent:", data)
       setPhoneCodeHash(data.phoneCodeHash)
       setStep("code")
     }
 
     const handle2FANeeded = () => {
+      console.log("2FA needed")
       setStep("password")
     }
 
     const handleLoginSuccess = (data: any) => {
+      console.log("Login successful:", data)
       onSuccess(data.sessionString)
     }
 
     const handleError = (data: any) => {
+      console.error("Login error:", data)
       setError(data.error)
       setGlobalError(data.error)
-      // Go back to phone step on error
-      setStep("phone")
+      // Don't automatically go back to phone step on error
+      // Let the user decide what to do
     }
 
     wsClient.on("login_code_sent", handleCodeSent)
     wsClient.on("login_2fa_needed", handle2FANeeded)
     wsClient.on("login_success", handleLoginSuccess)
     wsClient.on("error", handleError)
-
-    // Set up login callbacks for interactive authentication
-    wsClient.setLoginCallbacks({
-      onPhoneRequest: async () => {
-        setStep("phone")
-        // Return a promise that will be resolved when the user submits the phone number
-        return new Promise((resolve) => {
-          const phoneSubmitHandler = (e: Event) => {
-            e.preventDefault()
-            document.removeEventListener("phone-submit", phoneSubmitHandler)
-            resolve(phoneNumber)
-          }
-          document.addEventListener("phone-submit", phoneSubmitHandler)
-        })
-      },
-      onCodeRequest: async () => {
-        setStep("code")
-        // Return a promise that will be resolved when the user submits the code
-        return new Promise((resolve) => {
-          const codeSubmitHandler = (e: Event) => {
-            e.preventDefault()
-            document.removeEventListener("code-submit", codeSubmitHandler)
-            resolve(code)
-          }
-          document.addEventListener("code-submit", codeSubmitHandler)
-        })
-      },
-      onPasswordRequest: async () => {
-        setStep("password")
-        // Return a promise that will be resolved when the user submits the password
-        return new Promise((resolve) => {
-          const passwordSubmitHandler = (e: Event) => {
-            e.preventDefault()
-            document.removeEventListener("password-submit", passwordSubmitHandler)
-            resolve(password)
-          }
-          document.addEventListener("password-submit", passwordSubmitHandler)
-        })
-      },
-    })
 
     // Clean up event handlers
     return () => {
@@ -107,7 +71,7 @@ export function LoginDialog({ accountId, onSuccess, onCancel }: LoginDialogProps
       wsClient.off("login_success", handleLoginSuccess)
       wsClient.off("error", handleError)
     }
-  }, [accountId, phoneNumber, code, password, onSuccess, setGlobalError])
+  }, [accountId, onSuccess, setGlobalError])
 
   const handlePhoneSubmit = (e: React.FormEvent) => {
     e.preventDefault()
