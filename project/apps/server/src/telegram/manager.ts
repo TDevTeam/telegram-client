@@ -12,6 +12,7 @@ interface Account {
 
 export class TelegramManager {
   private accounts: Map<string, Account> = new Map();
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private messages: Map<string, any[]> = new Map();
 
   constructor() {
@@ -20,13 +21,16 @@ export class TelegramManager {
 
   private async loadAccounts() {
     // Load accounts from your existing config/accounts.txt
-    const accounts = []; // Load from file
+      const accounts = [{
+        token:   "1BAAOMTQ5LjE1NC4xNjcuOTEBuyXE1/pXWSLnG/eVXksgCdYwG+tFzbP2ZN2W9GU5evd97dImoU+oAZEexlc4fsIExxPssFwDxLltkO6fPNeObrmatv6BJyvqVDSdvgvyDqn4INDbVdb7Fn2W0c0gHX4pLY8qsfTFSJBJgQr+eQiotA8goa2fLxN88GmPC753VMDVuFAdwFqkl/B05r51AQ7ooToJGOZtsxRhDioxIHbu88cJKLaZCoyplqZc1Om8HtilgoOJpYw1Z51sWhHqARZ2guUXe5qaRLUN9GZV7NtZbGWgI38N0DN9P0oT7LDJ3xACcCFXAvHRVsXmmn9LBEkDWrUD194U4ZDGZapLfYneElQ="
+      }];
     
     for (const account of accounts) {
       await this.addAccount(account);
     }
   }
 
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private async addAccount(accountData: any) {
     const session = new StringSession(accountData.token);
     const client = new TelegramClient(
@@ -63,16 +67,18 @@ export class TelegramManager {
     }
   }
 
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private async handleNewMessage(event: any) {
     const message = event.message;
-    const accountId = message.peerId.userId.toString();
+    const accountId = String(message.peerId.userId);
     const account = this.accounts.get(accountId);
 
     if (!account) return;
 
     const messages = this.messages.get(accountId) || [];
+    console.log(messages)
     messages.push({
-      id: message.id.toString(),
+      id: String(message.id),
       text: message.message,
       fromMe: false,
       timestamp: Date.now(),
