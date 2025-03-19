@@ -9,6 +9,7 @@ interface Account {
   isOnline: boolean;
   avatar?: string;
   client: TelegramClient;
+  phoneNumber: string;
   unreadCount: number;
   lastSeen?: Date;
 }
@@ -75,6 +76,7 @@ export class TelegramManager {
         isOnline: true,
         client,
         unreadCount: 0,
+        phoneNumber: me.phone || "Unknown",
         avatar: me.photo?.photoId ? await this.getProfilePhoto(client, me.id) : undefined
       };
 

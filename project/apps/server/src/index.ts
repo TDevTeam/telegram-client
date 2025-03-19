@@ -32,6 +32,7 @@ io.on("connection", (socket) => {
   // Handle account-related events
   socket.on("getAccounts", () => {
     const accounts = manager.getAccounts();
+    console.log("getAccounts", accounts);
     socket.emit("accounts", accounts);
   });
 
