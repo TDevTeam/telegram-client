@@ -18,6 +18,8 @@ import { useTheme } from "next-themes"
 interface Account {
   id: string
   name: string
+  unreadCount: number
+  displayName: string
   phoneNumber: string
 }
 
@@ -263,7 +265,7 @@ export default function TelegramManager() {
                           >
                             <User className="mr-2 h-4 w-4" />
                             <div className="truncate">
-                              <div>{account.name}</div>
+                              <div>{account.displayName}</div>
                               <div className="text-xs text-muted-foreground">+{account.phoneNumber}</div>
                             </div>
                           </Button>
