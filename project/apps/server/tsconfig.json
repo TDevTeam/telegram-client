@@ -1,0 +1,13 @@
+
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "outDir": "../../dist/apps/server",
+    "target": "es2015",
+    "types": ["node"],
+    "lib": ["es2020"],
+    "esModuleInterop": true
+  },
+  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"],
+  "include": ["**/*.ts"]
+}
