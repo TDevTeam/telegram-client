@@ -173,9 +173,67 @@ export class TelegramManager extends EventEmitter {
     account.client.addEventHandler(async (event) => {
       const message = event.message;
 
-      const chatId = message.peerId?.toString();
+      const chatId = message.chatId?.toString();
 
-      if (!chatId) return;
+      if (!chatId) {
+        console.warn("NewMessage event received without a chatId:", event);
+        return;
+      }
+
+      let chat = this.chats.get(account.id)?.get(chatId);
+      if (!chat) {
+        try {
+          const peer = await account.client.getInputEntity(chatId);
+          const entity = await account.client.getEntity(peer);
+
+          if (entity) {
+            let title = "Unknown Chat";
+            let isGroup = false;
+            let avatar: string | undefined = undefined;
+
+            if (entity instanceof Api.User) {
+              title = entity.firstName || entity.username || `User ${entity.id.toString()}`;
+              isGroup = false;
+              avatar = entity.photo ? await this.getProfilePhotoUrl(account.client, entity) : undefined;
+            } else if (entity instanceof Api.Chat || entity instanceof Api.Channel) {
+              title = entity.title || `Chat ${entity.id.toString()}`;
+              isGroup = true;
+              avatar = entity.photo ? await this.getProfilePhotoUrl(account.client, entity) : undefined;
+            } else {
+               console.warn(`Fetched entity for ${chatId} is of unexpected type:`, entity?.className);
+            }
+
+            const newChat: Chat = {
+              id: entity.id.toString(),
+              title: title,
+              unreadCount: 0,
+              isGroup: isGroup,
+              avatar: avatar,
+              lastMessage: undefined,
+              permissions: undefined,
+              cooldown: undefined,
+              participants: undefined,
+            };
+
+            const accountChats = this.chats.get(account.id);
+            if (accountChats) {
+              accountChats.set(newChat.id, newChat);
+              chat = newChat;
+              this.emit("chatUpdate", { accountId: account.id, chat: newChat });
+              console.log(`Dynamically added chat ${newChat.title} (${newChat.id}) for account ${account.displayName}`);
+            } else {
+              console.error(`Account chat map not found for account ${account.id} when adding chat ${newChat.id}`);
+              return;
+            }
+          } else {
+            console.error(`Failed to fetch entity details for chat ID: ${chatId}`);
+            return;
+          }
+        } catch (error) {
+          console.error(`Error fetching or processing entity for chat ID ${chatId}:`, error);
+          return;
+        }
+      }
 
       const formattedMessage = await this.formatMessage(
         account.client,
@@ -183,22 +241,37 @@ export class TelegramManager extends EventEmitter {
       );
       this.addMessageToCache(account.id, chatId, formattedMessage);
 
+      // Always update the last message for the chat in the local cache
+      if (chat) {
+          chat.lastMessage = formattedMessage;
+          // Optionally, emit an event specifically for last message update if needed elsewhere
+          // this.emit("chatLastMessageUpdate", { accountId: account.id, chatId, message: formattedMessage });
+      } else {
+          // This case should theoretically not happen due to the check/fetch logic above,
+          // but adding a log just in case.
+          console.warn(`Chat ${chatId} not found when trying to update last message for account ${account.id}`);
+      }
+
+      // Emit the generic newMessage event for the client
       this.emit("newMessage", {
         accountId: account.id,
         chatId,
         message: formattedMessage,
       });
 
-      if (!formattedMessage.isFromMe) {
-        const chat = this.chats.get(account.id)?.get(chatId);
-        if (chat) {
-          chat.unreadCount++;
-          this.emit("unreadCountUpdate", {
-            accountId: account.id,
-            chatId,
-            unreadCount: chat.unreadCount,
-          });
-        }
+      // Only increment unread count and notify if the message is not from self
+      if (!formattedMessage.isFromMe && chat) {
+        chat.unreadCount++;
+        this.emit("unreadCountUpdate", {
+          accountId: account.id,
+          chatId,
+          unreadCount: chat.unreadCount,
+        });
+        // Emit global update after receiving a new unread message
+        this.emit("globalUnreadUpdate", {
+          accountId: account.id,
+          totalUnreadCount: this._calculateGlobalUnread(account.id)
+        });
       }
     }, new NewMessage({}));
 
@@ -207,19 +280,39 @@ export class TelegramManager extends EventEmitter {
         update instanceof Api.UpdateUserTyping ||
         update instanceof Api.UpdateChatUserTyping
       ) {
-        const chatId =
-          update instanceof Api.UpdateChatUserTyping
-            ? update.chatId.toString()
-            : update.userId.toString();
-        const userId =
-          update instanceof Api.UpdateUserTyping
-            ? update.userId.toString()
-            : update.userId.toString();
+        let chatId: string | undefined;
+        let userId: string | undefined;
 
-        if (!chatId || !userId) return;
+        if (update instanceof Api.UpdateChatUserTyping) {
+          // Group/Channel chat typing
+          chatId = update.chatId?.toString();
+          // User ID is inside the fromId field for group typings
+          if (update.fromId instanceof Api.PeerUser) {
+            userId = update.fromId.userId?.toString();
+          } else {
+            // Handle cases where fromId might be PeerChat/PeerChannel if needed, though typically it's PeerUser for typing
+             console.warn("UpdateChatUserTyping received with non-PeerUser fromId:", update.fromId);
+          }
+        } else if (update instanceof Api.UpdateUserTyping) {
+          // Private chat typing - the user ID acts as both chat and user ID
+          userId = update.userId?.toString();
+          chatId = userId; // In 1-on-1 chat, peer ID is the user ID
+        }
 
-        const chatTyping =
-          this.typingUsers.get(account.id)?.get(chatId) || new Set();
+        if (!chatId || !userId) {
+          console.warn("Could not determine chatId or userId from typing update:", update);
+          return;
+        }
+
+        const accountChatTyping = this.typingUsers.get(account.id);
+        if (!accountChatTyping) {
+           console.error(`Typing map not found for account ${account.id}`);
+           return; // Cannot proceed without the account's typing map
+        }
+
+        const chatTyping = accountChatTyping.get(chatId) || new Set<string>();
+        accountChatTyping.set(chatId, chatTyping); // Ensure the map has the chat entry
+
         chatTyping.add(userId);
 
         setTimeout(() => {
@@ -343,6 +436,23 @@ export class TelegramManager extends EventEmitter {
     accountCache.set(chatId, chatMessages);
   }
 
+  // Helper to calculate total unread count for an account
+  private _calculateGlobalUnread(accountId: string): number {
+    const accountChats = this.chats.get(accountId);
+    if (!accountChats) return 0;
+
+    let totalUnread = 0;
+    for (const chat of accountChats.values()) {
+      totalUnread += chat.unreadCount || 0;
+    }
+    return totalUnread;
+  }
+
+  // Public getter for initial fetch by client
+  public getGlobalUnreadCount(accountId: string): number {
+     return this._calculateGlobalUnread(accountId);
+  }
+
   public async getMessages(
     accountId: string,
     chatId: string,
@@ -383,19 +493,26 @@ export class TelegramManager extends EventEmitter {
       await account.client.invoke(
         new Api.messages.ReadHistory({
           peer: await account.client.getInputEntity(chatId),
-          maxId: 0,
+          maxId: 0, // Mark all as read up to the latest
         })
       );
 
+      // Update local state after successful API call
       chat.unreadCount = 0;
       this.emit("unreadCountUpdate", {
         accountId,
         chatId,
         unreadCount: 0,
       });
+      // Emit global update after marking read
+      this.emit("globalUnreadUpdate", {
+        accountId,
+        totalUnreadCount: this._calculateGlobalUnread(accountId)
+      });
     } catch (error) {
       console.error("Failed to mark messages as read:", error);
-      throw error;
+      // Potentially re-throw or handle specific errors (like PEER_ID_INVALID)
+      throw error; // Re-throw original error
     }
   }
 
@@ -446,6 +563,14 @@ export class TelegramManager extends EventEmitter {
 
       const formattedMessage = await this.formatMessage(account.client, result);
       this.addMessageToCache(accountId, chatId, formattedMessage);
+
+      // Also update the last message in the chat cache
+      if (chat) {
+        chat.lastMessage = formattedMessage;
+      } else {
+         // Should not happen given the check at the start, but log if it does
+         console.warn(`Chat ${chatId} not found when trying to update last message after sending for account ${accountId}`);
+      }
 
       this.emit("newMessage", {
         accountId,

@@ -335,51 +335,51 @@ export default function TelegramManager() {
 
           // Mark as read
           socketInstance.emit("markAsRead", { accountId, chatId })
-        } else {
-          // Add to notifications
-          setNotifications((prev) => [...prev, { accountId, chatId, message, read: false }])
-
-          // Show toast notification
-          toast({
-            title: `New message in ${chats[accountId]?.find((c) => c.id === chatId)?.title || "Chat"}`,
-            description: message.text.length > 50 ? `${message.text.substring(0, 50)}...` : message.text,
-            action: (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  navigateToChat(accountId, chatId)
-                }}
-              >
-                View
-              </Button>
-            ),
-          })
-
-          // Update chat unread count and lastMessage
-          setChats((prev) => {
-            const accountChats = prev[accountId] || []
-            return {
-              ...prev,
-              [accountId]: accountChats.map((chat) =>
-                chat.id === chatId
-                  ? {
-                      ...chat,
-                      unreadCount: (chat.unreadCount || 0) + 1,
-                      lastMessage: message, // Update the lastMessage property
-                    }
-                  : chat,
-              ),
-            }
-          })
-
-          // Update account unread count
-          setAccounts((prev) =>
-            prev.map((account) =>
-              account.id === accountId ? { ...account, unreadCount: (account.unreadCount || 0) + 1 } : account,
-            ),
-          )
         }
+
+        // Add to notifications
+        setNotifications((prev) => [...prev, { accountId, chatId, message, read: false }])
+
+        // Show toast notification
+        toast({
+          title: `New message in ${chats[accountId]?.find((c) => c.id === chatId)?.title || "Chat"}`,
+          description: message.text.length > 50 ? `${message.text.substring(0, 50)}...` : message.text,
+          action: (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                navigateToChat(accountId, chatId)
+              }}
+            >
+              View
+            </Button>
+          ),
+        })
+
+        // Update chat unread count and lastMessage
+        setChats((prev) => {
+          const accountChats = prev[accountId] || []
+          return {
+            ...prev,
+            [accountId]: accountChats.map((chat) =>
+              chat.id === chatId
+                ? {
+                    ...chat,
+                    unreadCount: (chat.unreadCount || 0) + 1,
+                    lastMessage: message,
+                  }
+                : chat,
+            ),
+          }
+        })
+
+        // Update account unread count
+        setAccounts((prev) =>
+          prev.map((account) =>
+            account.id === accountId ? { ...account, unreadCount: (account.unreadCount || 0) + 1 } : account,
+          ),
+        )
       },
     )
 
