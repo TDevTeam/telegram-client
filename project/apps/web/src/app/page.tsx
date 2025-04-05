@@ -27,18 +27,71 @@ import {
   Edit,
   CheckCheck,
   MoreVertical,
-  Image,
-  Mic,
-  File,
-  Volume2,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
 import { Toaster } from "@/components/ui/toaster"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useTheme } from "next-themes"
-import { TypingIndicator } from "@/components/typing-indicator"
-import type { Account, Chat, Message, NavigationTarget, NotificationSettings } from "@/types/telegram"
+
+// Types
+interface Account {
+  id: string
+  displayName: string
+  isOnline: boolean
+  avatar?: string
+  phoneNumber: string
+  unreadCount: number
+  lastSeen?: Date
+}
+
+interface Chat {
+  id: string
+  title: string
+  unreadCount: number
+  lastMessage?: Message
+  isGroup: boolean
+  avatar?: string
+  permissions?: ChatPermissions
+  cooldown?: number // Cooldown in seconds
+  participants?: ChatParticipant[]
+}
+
+interface Message {
+  id: string
+  text: string
+  isFromMe: boolean // Note: backend uses isFromMe, not fromMe
+  timestamp: number
+  media?: string
+  sender?: {
+    id: string
+    name: string
+    avatar?: string
+  }
+  replyTo?: string
+  edited?: boolean
+  forwarded?: boolean
+}
+
+interface ChatPermissions {
+  canSendMessages: boolean
+  canSendMedia: boolean
+  canInviteUsers: boolean
+  canPinMessages: boolean
+}
+
+interface ChatParticipant {
+  id: string
+  name: string
+  avatar?: string
+  role: "admin" | "member" | "creator"
+}
+
+interface NavigationTarget {
+  accountId: string
+  chatId: string
+  notificationIndex?: number
+}
 
 export default function TelegramManager() {
   // Theme
@@ -76,8 +129,6 @@ export default function TelegramManager() {
     chats: false,
     messages: false,
   })
-  const [hasMoreMessages, setHasMoreMessages] = useState<Record<string, Record<string, boolean>>>({})
-  const [nextCursor, setNextCursor] = useState<Record<string, Record<string, string | undefined>>>({})
 
   // Navigation target ref for handling notification clicks
   const navigationTargetRef = useRef<NavigationTarget | null>(null)
@@ -114,89 +165,72 @@ export default function TelegramManager() {
       setLoading((prev) => ({ ...prev, accounts: false }))
 
       if (accountsData.length > 0 && !selectedAccount) {
-        const readyAccount = accountsData.find((acc) => acc.setupStatus === "ready")
-        if (readyAccount) {
-          const firstAccountId = readyAccount.id
-          console.log("Selecting first ready account:", firstAccountId)
-          setSelectedAccount(firstAccountId)
-          setLoading((prev) => ({ ...prev, chats: true }))
-          socketInstance.emit("getChats", firstAccountId)
-        }
+        const firstAccountId = accountsData[0].id
+        console.log("Selecting first account:", firstAccountId)
+        setSelectedAccount(firstAccountId)
+        setLoading((prev) => ({ ...prev, chats: true }))
+        socketInstance.emit("getChats", firstAccountId)
+      }
+    })
+
+    socketInstance.on("chats", ({ accountId, chats: chatsData }: { accountId: string; chats: Chat[] | any }) => {
+      console.log("Received chats for account:", accountId, chatsData)
+      setLoading((prev) => ({ ...prev, chats: false }))
+      chatsLoadedRef.current = true
+
+      // Ensure chatsData is an array
+      const chatArray = Array.isArray(chatsData) ? chatsData : []
+
+      setChats((prev) => ({ ...prev, [accountId]: chatArray }))
+
+      // Initialize cooldowns for chats
+      const newCooldowns: Record<string, number> = {}
+
+      // Safely iterate over chats
+      if (Array.isArray(chatArray)) {
+        chatArray.forEach((chat) => {
+          if (chat && chat.cooldown) {
+            newCooldowns[chat.id] = 0
+          }
+        })
+      }
+
+      setCooldowns((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...(prev[accountId] || {}),
+          ...newCooldowns,
+        },
+      }))
+
+      // Check if we have a pending navigation target
+      if (navigationTargetRef.current && navigationTargetRef.current.accountId === accountId) {
+        console.log("Navigating to target chat after chats loaded:", navigationTargetRef.current)
+        const { chatId } = navigationTargetRef.current
+        setSelectedChat(chatId)
+        setLoading((prev) => ({ ...prev, messages: true }))
+        socketInstance.emit("getMessages", accountId, chatId)
+        socketInstance.emit("markAsRead", { accountId, chatId })
+
+        // Clear the navigation target
+        navigationTargetRef.current = null
+      } else if (chatArray.length > 0 && !selectedChat) {
+        const firstChatId = chatArray[0].id
+        console.log("Selecting first chat:", firstChatId)
+        setSelectedChat(firstChatId)
+        setLoading((prev) => ({ ...prev, messages: true }))
+        socketInstance.emit("getMessages", accountId, firstChatId)
       }
     })
 
     socketInstance.on(
-      "chats",
-      ({
-        accountId,
-        items,
-        hasMore,
-        nextCursor,
-      }: { accountId: string; items: Chat[]; hasMore: boolean; nextCursor?: string }) => {
-        console.log("Received chats for account:", accountId, items, hasMore, nextCursor)
-        setLoading((prev) => ({ ...prev, chats: false }))
-        chatsLoadedRef.current = true
-
-        // Ensure items is an array
-        const chatArray = Array.isArray(items) ? items : []
-
-        setChats((prev) => ({ ...prev, [accountId]: chatArray }))
-
-        // Initialize cooldowns for chats
-        const newCooldowns: Record<string, number> = {}
-
-        // Safely iterate over chats
-        if (Array.isArray(chatArray)) {
-          chatArray.forEach((chat) => {
-            if (chat && chat.cooldown) {
-              newCooldowns[chat.id] = 0
-            }
-          })
-        }
-
-        setCooldowns((prev) => ({
-          ...prev,
-          [accountId]: {
-            ...(prev[accountId] || {}),
-            ...newCooldowns,
-          },
-        }))
-
-        // Check if we have a pending navigation target
-        if (navigationTargetRef.current && navigationTargetRef.current.accountId === accountId) {
-          console.log("Navigating to target chat after chats loaded:", navigationTargetRef.current)
-          const { chatId } = navigationTargetRef.current
-          setSelectedChat(chatId)
-          setLoading((prev) => ({ ...prev, messages: true }))
-          socketInstance.emit("getMessages", accountId, chatId)
-          socketInstance.emit("markAsRead", { accountId, chatId })
-
-          // Clear the navigation target
-          navigationTargetRef.current = null
-        } else if (chatArray.length > 0 && !selectedChat) {
-          const firstChatId = chatArray[0].id
-          console.log("Selecting first chat:", firstChatId)
-          setSelectedChat(firstChatId)
-          setLoading((prev) => ({ ...prev, messages: true }))
-          socketInstance.emit("getMessages", accountId, firstChatId)
-        }
-      },
-    )
-
-    socketInstance.on(
       "messages",
-      ({
-        accountId,
-        chatId,
-        items,
-        hasMore,
-        nextCursor,
-      }: { accountId: string; chatId: string; items: Message[]; hasMore: boolean; nextCursor?: string }) => {
-        console.log("Received messages for account/chat:", accountId, chatId, items, hasMore, nextCursor)
+      ({ accountId, chatId, messages: messagesData }: { accountId: string; chatId: string; messages: Message[] }) => {
+        console.log("Received messages for account/chat:", accountId, chatId, messagesData)
         setLoading((prev) => ({ ...prev, messages: false }))
 
-        // Ensure items is an array
-        const messageArray = Array.isArray(items) ? items : []
+        // Ensure messagesData is an array
+        const messageArray = Array.isArray(messagesData) ? messagesData : []
 
         setMessages((prev) => ({
           ...prev,
@@ -205,126 +239,9 @@ export default function TelegramManager() {
             [chatId]: messageArray,
           },
         }))
-
-        // Store pagination info
-        setHasMoreMessages((prev) => ({
-          ...prev,
-          [accountId]: {
-            ...(prev[accountId] || {}),
-            [chatId]: hasMore,
-          },
-        }))
-
-        setNextCursor((prev) => ({
-          ...prev,
-          [accountId]: {
-            ...(prev[accountId] || {}),
-            [chatId]: nextCursor,
-          },
-        }))
-
         scrollToBottom()
       },
     )
-
-    // Replace the existing "messageReceived" event handler with this improved version:
-    socketInstance.on(
-      "messageReceived",
-      ({ accountId, chatId, message }: { accountId: string; chatId: string; message: Message }) => {
-        console.log("New message received:", accountId, chatId, message)
-
-        // Update messages if we're currently viewing this chat
-        if (selectedAccount === accountId && selectedChat === chatId) {
-          setMessages((prev) => {
-            const accountMessages = prev[accountId] || {}
-            const chatMessages = accountMessages[chatId] || []
-            return {
-              ...prev,
-              [accountId]: {
-                ...accountMessages,
-                [chatId]: [...chatMessages, message],
-              },
-            }
-          })
-          scrollToBottom()
-
-          // Mark as read
-          socketInstance.emit("markAsRead", { accountId, chatId })
-        } else {
-          // Add to notifications
-          setNotifications((prev) => [...prev, { accountId, chatId, message, read: false }])
-
-          // Get account and chat info for the notification
-          const account = accounts.find((a) => a.id === accountId)
-          const chat = chats[accountId]?.find((c) => c.id === chatId)
-
-          // Show toast notification
-          toast({
-            title: (
-              <div className="flex items-center gap-2">
-                <span className="bg-primary account-badge text-white">
-                  {account?.displayName.split(" ")[0] || "Account"}
-                </span>
-                <span>{chat?.title || "New message"}</span>
-              </div>
-            ),
-            description: message.text?.length > 50 ? `${message.text.substring(0, 50)}...` : message.text,
-            action: (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  navigateToChat(accountId, chatId)
-                }}
-              >
-                View
-              </Button>
-            ),
-          })
-        }
-
-        // Always update the chat's lastMessage property and move the chat to the top of the list
-        setChats((prev) => {
-          const accountChats = prev[accountId] || []
-
-          // Find the chat that received the message
-          const updatedChat = accountChats.find((c) => c.id === chatId)
-          if (!updatedChat) return prev // Chat not found
-
-          // Create updated chat with new lastMessage and incremented unread count
-          // (only increment unread if we're not currently viewing this chat)
-          const chatWithUpdatedMessage = {
-            ...updatedChat,
-            lastMessage: message,
-            unreadCount:
-              selectedAccount === accountId && selectedChat === chatId
-                ? updatedChat.unreadCount || 0
-                : (updatedChat.unreadCount || 0) + 1,
-          }
-
-          // Remove the chat from its current position
-          const filteredChats = accountChats.filter((c) => c.id !== chatId)
-
-          // Return updated chats with the updated chat at the beginning (top)
-          return {
-            ...prev,
-            [accountId]: [chatWithUpdatedMessage, ...filteredChats],
-          }
-        })
-
-        // Update account unread count if we're not currently viewing this chat
-        if (!(selectedAccount === accountId && selectedChat === chatId)) {
-          setAccounts((prev) =>
-            prev.map((account) =>
-              account.id === accountId ? { ...account, unreadCount: (account.unreadCount || 0) + 1 } : account,
-            ),
-          )
-        }
-      },
-    )
-
-    // Also update the messageSent handler to ensure proper chat ordering
-    // Find the "messageSent" event handler and enhance it:
 
     socketInstance.on(
       "messageSent",
@@ -368,27 +285,14 @@ export default function TelegramManager() {
               }
             })
 
-            // Update the lastMessage in the chat and move the chat to the top of the list
+            // Update the lastMessage in the chat
             setChats((prev) => {
               const accountChats = prev[accountId] || []
-
-              // Find the chat that received the message
-              const updatedChat = accountChats.find((c) => c.id === chatId)
-              if (!updatedChat) return prev // Chat not found
-
-              // Create updated chat with new lastMessage
-              const chatWithUpdatedMessage = {
-                ...updatedChat,
-                lastMessage: message,
-              }
-
-              // Remove the chat from its current position
-              const filteredChats = accountChats.filter((c) => c.id !== chatId)
-
-              // Return updated chats with the updated chat at the beginning (top)
               return {
                 ...prev,
-                [accountId]: [chatWithUpdatedMessage, ...filteredChats],
+                [accountId]: accountChats.map((chat) =>
+                  chat.id === chatId ? { ...chat, lastMessage: message } : chat,
+                ),
               }
             })
           }
@@ -404,6 +308,77 @@ export default function TelegramManager() {
               },
             }))
           }
+        }
+      },
+    )
+
+    // Handle real-time events
+    socketInstance.on(
+      "messageReceived",
+      ({ accountId, chatId, message }: { accountId: string; chatId: string; message: Message }) => {
+        console.log("New message received:", accountId, chatId, message)
+
+        // Update messages if we're currently viewing this chat
+        if (selectedAccount === accountId && selectedChat === chatId) {
+          setMessages((prev) => {
+            const accountMessages = prev[accountId] || {}
+            const chatMessages = accountMessages[chatId] || []
+            return {
+              ...prev,
+              [accountId]: {
+                ...accountMessages,
+                [chatId]: [...chatMessages, message],
+              },
+            }
+          })
+          scrollToBottom()
+
+          // Mark as read
+          socketInstance.emit("markAsRead", { accountId, chatId })
+        } else {
+          // Add to notifications
+          setNotifications((prev) => [...prev, { accountId, chatId, message, read: false }])
+
+          // Show toast notification
+          toast({
+            title: `New message in ${chats[accountId]?.find((c) => c.id === chatId)?.title || "Chat"}`,
+            description: message.text.length > 50 ? `${message.text.substring(0, 50)}...` : message.text,
+            action: (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  navigateToChat(accountId, chatId)
+                }}
+              >
+                View
+              </Button>
+            ),
+          })
+
+          // Update chat unread count and lastMessage
+          setChats((prev) => {
+            const accountChats = prev[accountId] || []
+            return {
+              ...prev,
+              [accountId]: accountChats.map((chat) =>
+                chat.id === chatId
+                  ? {
+                      ...chat,
+                      unreadCount: (chat.unreadCount || 0) + 1,
+                      lastMessage: message, // Update the lastMessage property
+                    }
+                  : chat,
+              ),
+            }
+          })
+
+          // Update account unread count
+          setAccounts((prev) =>
+            prev.map((account) =>
+              account.id === accountId ? { ...account, unreadCount: (account.unreadCount || 0) + 1 } : account,
+            ),
+          )
         }
       },
     )
@@ -456,90 +431,6 @@ export default function TelegramManager() {
 
           // Update account total unread count
           updateAccountUnreadCount(accountId)
-        }
-      },
-    )
-
-    socketInstance.on(
-      "setupStatus",
-      ({
-        accountId,
-        status,
-        error,
-      }: { accountId: string; status: "initializing" | "connecting" | "ready" | "error"; error?: string }) => {
-        console.log("Account setup status update:", accountId, status, error)
-
-        setAccounts((prev) =>
-          prev.map((account) =>
-            account.id === accountId ? { ...account, setupStatus: status, setupError: error } : account,
-          ),
-        )
-      },
-    )
-
-    socketInstance.on(
-      "notificationSettings",
-      ({
-        accountId,
-        chatId,
-        settings,
-        success,
-      }: { accountId: string; chatId: string; settings: NotificationSettings; success: boolean }) => {
-        if (success) {
-          setChats((prev) => {
-            const accountChats = prev[accountId] || []
-            return {
-              ...prev,
-              [accountId]: accountChats.map((chat) =>
-                chat.id === chatId ? { ...chat, notificationSettings: settings } : chat,
-              ),
-            }
-          })
-        }
-      },
-    )
-
-    socketInstance.on(
-      "mediaLoaded",
-      ({
-        accountId,
-        chatId,
-        messageId,
-        mediaKey,
-        success,
-        error,
-      }: {
-        accountId: string
-        chatId: string
-        messageId: string
-        mediaKey?: string
-        success: boolean
-        error?: string
-      }) => {
-        if (success && mediaKey) {
-          // Update the message with the loaded media URL
-          setMessages((prev) => {
-            const accountMessages = prev[accountId] || {}
-            const chatMessages = accountMessages[chatId] || []
-
-            return {
-              ...prev,
-              [accountId]: {
-                ...accountMessages,
-                [chatId]: chatMessages.map((msg) =>
-                  msg.id === messageId && msg.media
-                    ? { ...msg, media: { ...msg.media, url: `/api/media/${mediaKey}` } }
-                    : msg,
-                ),
-              },
-            }
-          })
-        } else if (error) {
-          toast({
-            title: "Error loading media",
-            description: error,
-            variant: "destructive",
-          })
         }
       },
     )
@@ -789,14 +680,6 @@ export default function TelegramManager() {
     [messageInput, selectedAccount, selectedChat, socket, chats, cooldowns, replyingTo, toast, scrollToBottom],
   )
 
-  // Load more messages
-  const loadMoreMessages = useCallback(() => {
-    if (selectedAccount && selectedChat && socket && hasMoreMessages[selectedAccount]?.[selectedChat]) {
-      const cursor = nextCursor[selectedAccount]?.[selectedChat]
-      socket.emit("getMessages", selectedAccount, selectedChat, 20, cursor)
-    }
-  }, [selectedAccount, selectedChat, socket, hasMoreMessages, nextCursor])
-
   // Format timestamp
   const formatTime = useCallback((timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -886,41 +769,9 @@ export default function TelegramManager() {
     return true
   }, [selectedAccount, selectedChat, chats, cooldowns])
 
-  // Render media icon based on type
-  const renderMediaIcon = useCallback((type: string) => {
-    switch (type) {
-      case "photo":
-        return <Image className="h-4 w-4" />
-      case "video":
-        return <Image className="h-4 w-4" />
-      case "voice":
-        return <Mic className="h-4 w-4" />
-      case "audio":
-        return <Volume2 className="h-4 w-4" />
-      case "document":
-      default:
-        return <File className="h-4 w-4" />
-    }
-  }, [])
-
-  // Handle media load
-  const handleLoadMedia = useCallback(
-    (accountId: string, chatId: string, messageId: string, mediaType: string) => {
-      if (socket) {
-        socket.emit("loadMedia", {
-          accountId,
-          chatId,
-          messageId,
-          type: mediaType,
-        })
-      }
-    },
-    [socket],
-  )
-
   return (
     <div className="flex flex-col h-screen bg-background">
-      <header className="bg-background border-b border-border py-3 px-6 flex justify-between items-center sticky top-0 z-10">
+      <header className="bg-background border-b border-border py-3 px-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetTrigger asChild>
@@ -950,7 +801,6 @@ export default function TelegramManager() {
                             variant={selectedAccount === account.id ? "default" : "ghost"}
                             className="w-full justify-start mb-1 text-left pr-10"
                             onClick={() => handleAccountSelect(account.id)}
-                            disabled={account.setupStatus !== "ready"}
                           >
                             <div className="flex items-center gap-2 w-full">
                               <Avatar className="h-8 w-8">
@@ -974,9 +824,6 @@ export default function TelegramManager() {
                                   <div
                                     className={`h-2 w-2 rounded-full ${account.isOnline ? "bg-green-500" : "bg-gray-400"}`}
                                   ></div>
-                                  {account.setupStatus !== "ready" && (
-                                    <span className="ml-1">({account.setupStatus})</span>
-                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1006,39 +853,41 @@ export default function TelegramManager() {
                         </div>
                       ) : chats[selectedAccount]?.length > 0 ? (
                         <div className="p-2">
-                          {/* Update the chat list items in the sidebar */}
                           {chats[selectedAccount].map((chat) => (
-                            <div
+                            <Button
                               key={chat.id}
-                              className={`chat-list-item ${selectedChat === chat.id ? "active" : ""}`}
+                              variant={selectedChat === chat.id ? "default" : "ghost"}
+                              className="w-full justify-start mb-1 text-left h-auto py-3"
                               onClick={() => handleChatSelect(chat.id)}
                             >
-                              <Avatar className="h-10 w-10 flex-shrink-0">
-                                {chat.avatar ? (
-                                  <AvatarImage src={chat.avatar} alt={chat.title} />
-                                ) : (
-                                  <AvatarFallback>{getInitials(chat.title)}</AvatarFallback>
-                                )}
-                              </Avatar>
-                              <div className="flex flex-col flex-1 min-w-0">
-                                <div className="flex justify-between items-center w-full">
-                                  <span className="font-medium truncate flex items-center gap-1">
-                                    {chat.title}
-                                    {(chat.isGroup || chat.isSupergroup) && <Users className="h-3 w-3 ml-1" />}
-                                  </span>
-                                  {chat.unreadCount > 0 && (
-                                    <span className="unread-badge ml-2">{chat.unreadCount}</span>
+                              <div className="flex items-center gap-2 w-full">
+                                <Avatar className="h-8 w-8">
+                                  {chat.avatar ? (
+                                    <AvatarImage src={chat.avatar} alt={chat.title} />
+                                  ) : (
+                                    <AvatarFallback>{getInitials(chat.title)}</AvatarFallback>
+                                  )}
+                                </Avatar>
+                                <div className="flex flex-col items-start flex-1">
+                                  <div className="flex justify-between w-full">
+                                    <span className="font-medium truncate flex items-center gap-1">
+                                      {chat.title}
+                                      {chat.isGroup && <Users className="h-3 w-3" />}
+                                    </span>
+                                    {chat.unreadCount > 0 && (
+                                      <Badge variant="destructive" className="ml-2">
+                                        {chat.unreadCount}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {chat.lastMessage && (
+                                    <div className="text-xs text-muted-foreground mt-1 truncate w-full">
+                                      {chat.lastMessage.text}
+                                    </div>
                                   )}
                                 </div>
-                                {chat.lastMessage && (
-                                  <div className="text-xs text-muted-foreground mt-1 truncate w-full flex items-center gap-1">
-                                    {chat.lastMessage.media && renderMediaIcon(chat.lastMessage.media.type)}
-                                    {chat.lastMessage.text ||
-                                      (chat.lastMessage.media ? `[${chat.lastMessage.media.type}]` : "")}
-                                  </div>
-                                )}
                               </div>
-                            </div>
+                            </Button>
                           ))}
                         </div>
                       ) : (
@@ -1054,7 +903,7 @@ export default function TelegramManager() {
           </Sheet>
 
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <MessageSquare className="h-6 w-6 text-primary" /> Telegram Manager
+            <MessageSquare className="h-6 w-6" /> Telegram Manager
           </h1>
         </div>
 
@@ -1065,22 +914,16 @@ export default function TelegramManager() {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" className="relative">
                   <Bell className="h-5 w-5" />
-                  {/* Update the notification badge in the header */}
                   <Badge
                     variant="destructive"
-                    className="absolute -top-1 -right-1 flex items-center justify-center p-0 min-w-5 h-5 text-xs"
+                    className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0"
                   >
                     {notifications.filter((n) => !n.read).length}
                   </Badge>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80">
-                <div className="p-3 font-semibold border-b flex items-center justify-between">
-                  <span>Notifications</span>
-                  <Badge variant="outline" className="font-normal">
-                    {notifications.filter((n) => !n.read).length} unread
-                  </Badge>
-                </div>
+                <div className="p-2 font-semibold border-b">Notifications</div>
                 <ScrollArea className="h-80">
                   {notifications
                     .filter((n) => !n.read)
@@ -1091,7 +934,7 @@ export default function TelegramManager() {
                       return (
                         <div
                           key={index}
-                          className="p-3 border-b cursor-pointer hover:bg-accent transition-colors"
+                          className="p-2 border-b cursor-pointer hover:bg-accent"
                           onClick={() => {
                             navigateToChat(notification.accountId, notification.chatId, index)
                           }}
@@ -1111,11 +954,7 @@ export default function TelegramManager() {
                               </div>
                             </div>
                           </div>
-                          <div className="mt-1 text-sm">
-                            {notification.message.media && renderMediaIcon(notification.message.media.type)}
-                            {notification.message.text ||
-                              (notification.message.media ? `[${notification.message.media.type}]` : "")}
-                          </div>
+                          <div className="mt-1 text-sm">{notification.message.text}</div>
                           <div className="text-xs text-muted-foreground mt-1">
                             {formatTime(notification.message.timestamp)}
                           </div>
@@ -1127,21 +966,9 @@ export default function TelegramManager() {
             </DropdownMenu>
           )}
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                  className="transition-colors"
-                >
-                  {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </Button>
 
           <div className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}></div>
         </div>
@@ -1170,7 +997,6 @@ export default function TelegramManager() {
                       variant={selectedAccount === account.id ? "default" : "ghost"}
                       className="w-full justify-start mb-1 text-left pr-10"
                       onClick={() => handleAccountSelect(account.id)}
-                      disabled={account.setupStatus !== "ready"}
                     >
                       <div className="flex items-center gap-2 w-full">
                         <Avatar className="h-8 w-8">
@@ -1194,7 +1020,6 @@ export default function TelegramManager() {
                             <div
                               className={`h-2 w-2 rounded-full ${account.isOnline ? "bg-green-500" : "bg-gray-400"}`}
                             ></div>
-                            {account.setupStatus !== "ready" && <span className="ml-1">({account.setupStatus})</span>}
                           </div>
                         </div>
                       </div>
@@ -1225,37 +1050,41 @@ export default function TelegramManager() {
                 </div>
               ) : chats[selectedAccount]?.length > 0 ? (
                 <div className="p-2">
-                  {/* Update the chat list items in the sidebar */}
                   {chats[selectedAccount].map((chat) => (
-                    <div
+                    <Button
                       key={chat.id}
-                      className={`chat-list-item ${selectedChat === chat.id ? "active" : ""}`}
+                      variant={selectedChat === chat.id ? "default" : "ghost"}
+                      className="w-full justify-start mb-1 text-left h-auto py-3"
                       onClick={() => handleChatSelect(chat.id)}
                     >
-                      <Avatar className="h-10 w-10 flex-shrink-0">
-                        {chat.avatar ? (
-                          <AvatarImage src={chat.avatar} alt={chat.title} />
-                        ) : (
-                          <AvatarFallback>{getInitials(chat.title)}</AvatarFallback>
-                        )}
-                      </Avatar>
-                      <div className="flex flex-col flex-1 min-w-0">
-                        <div className="flex justify-between items-center w-full">
-                          <span className="font-medium truncate flex items-center gap-1">
-                            {chat.title}
-                            {(chat.isGroup || chat.isSupergroup) && <Users className="h-3 w-3 ml-1" />}
-                          </span>
-                          {chat.unreadCount > 0 && <span className="unread-badge ml-2">{chat.unreadCount}</span>}
-                        </div>
-                        {chat.lastMessage && (
-                          <div className="text-xs text-muted-foreground mt-1 truncate w-full flex items-center gap-1">
-                            {chat.lastMessage.media && renderMediaIcon(chat.lastMessage.media.type)}
-                            {chat.lastMessage.text ||
-                              (chat.lastMessage.media ? `[${chat.lastMessage.media.type}]` : "")}
+                      <div className="flex items-center gap-2 w-full">
+                        <Avatar className="h-8 w-8">
+                          {chat.avatar ? (
+                            <AvatarImage src={chat.avatar} alt={chat.title} />
+                          ) : (
+                            <AvatarFallback>{getInitials(chat.title)}</AvatarFallback>
+                          )}
+                        </Avatar>
+                        <div className="flex flex-col items-start flex-1">
+                          <div className="flex justify-between w-full">
+                            <span className="font-medium truncate flex items-center gap-1">
+                              {chat.title}
+                              {chat.isGroup && <Users className="h-3 w-3" />}
+                            </span>
+                            {chat.unreadCount > 0 && (
+                              <Badge variant="destructive" className="ml-2">
+                                {chat.unreadCount}
+                              </Badge>
+                            )}
                           </div>
-                        )}
+                          {chat.lastMessage && (
+                            <div className="text-xs text-muted-foreground mt-1 truncate w-full">
+                              {chat.lastMessage.text}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </Button>
                   ))}
                 </div>
               ) : (
@@ -1292,13 +1121,10 @@ export default function TelegramManager() {
 
                     {/* Typing indicator */}
                     {typingUsers[selectedAccount]?.[selectedChat]?.length > 0 && (
-                      <div className="text-xs text-muted-foreground flex items-center">
-                        <span className="mr-1">
-                          {typingUsers[selectedAccount][selectedChat].length === 1
-                            ? `${typingUsers[selectedAccount][selectedChat][0]} is typing`
-                            : `${typingUsers[selectedAccount][selectedChat].length} people are typing`}
-                        </span>
-                        <TypingIndicator />
+                      <div className="text-xs text-muted-foreground">
+                        {typingUsers[selectedAccount][selectedChat].length === 1
+                          ? `${typingUsers[selectedAccount][selectedChat][0]} is typing...`
+                          : `${typingUsers[selectedAccount][selectedChat].length} people are typing...`}
                       </div>
                     )}
                   </div>
@@ -1333,23 +1159,6 @@ export default function TelegramManager() {
                             >
                               Mark as Read
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                socket?.emit("markAsUnread", { accountId: selectedAccount, chatId: selectedChat })
-                              }
-                            >
-                              Mark as Unread
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                socket?.emit("getNotificationSettings", {
-                                  accountId: selectedAccount,
-                                  chatId: selectedChat,
-                                })
-                              }
-                            >
-                              Notification Settings
-                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -1366,16 +1175,7 @@ export default function TelegramManager() {
                 </TooltipProvider>
               </div>
 
-              <ScrollArea className="flex-1 p-5">
-                {hasMoreMessages[selectedAccount]?.[selectedChat] && (
-                  <div className="text-center mb-4">
-                    <Button variant="outline" size="sm" onClick={loadMoreMessages} disabled={loading.messages}>
-                      {loading.messages ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                      Load more messages
-                    </Button>
-                  </div>
-                )}
-
+              <ScrollArea className="flex-1 p-4">
                 {loading.messages ? (
                   <div className="flex flex-col gap-4">
                     <div className="h-20 bg-muted animate-pulse rounded-md"></div>
@@ -1384,7 +1184,6 @@ export default function TelegramManager() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* Update the message rendering section in the main content area */}
                     {messages[selectedAccount]?.[selectedChat]?.length > 0 ? (
                       groupMessagesByDate(messages[selectedAccount][selectedChat]).map(([date, dateMessages]) => (
                         <div key={date} className="space-y-3">
@@ -1395,7 +1194,7 @@ export default function TelegramManager() {
                           {dateMessages.map((message) => (
                             <div
                               key={message.id}
-                              className={`flex ${message.isFromMe ? "justify-end" : "justify-start"} message-container`}
+                              className={`flex ${message.isFromMe ? "justify-end" : "justify-start"}`}
                             >
                               <div className="relative group max-w-[70%]">
                                 {!message.isFromMe && message.sender && (
@@ -1414,8 +1213,10 @@ export default function TelegramManager() {
                                 {/* Reply reference */}
                                 {message.replyTo && (
                                   <div
-                                    className={`reply-reference ${
-                                      message.isFromMe ? "reply-reference-from-me" : "reply-reference-from-other"
+                                    className={`text-xs p-2 rounded-t-lg border-l-2 ${
+                                      message.isFromMe
+                                        ? "bg-primary/20 border-primary-foreground"
+                                        : "bg-card/50 border-card-foreground/30"
                                     }`}
                                   >
                                     <div className="font-medium">
@@ -1430,130 +1231,54 @@ export default function TelegramManager() {
                                 )}
 
                                 <div
-                                  className={`message-bubble ${message.replyTo ? "rounded-t-none" : ""} ${
-                                    message.isFromMe ? "message-bubble-from-me" : "message-bubble-from-other"
+                                  className={`p-3 rounded-lg ${message.replyTo ? "rounded-t-none" : ""} ${
+                                    message.isFromMe
+                                      ? "bg-primary text-primary-foreground"
+                                      : "bg-card text-card-foreground border border-border"
                                   }`}
                                 >
                                   {/* Message media */}
                                   {message.media && (
                                     <div className="mb-2">
-                                      {message.media.url ? (
-                                        message.media.type === "photo" || message.media.type === "video" ? (
-                                          <img
-                                            src={message.media.url || "/placeholder.svg"}
-                                            alt={message.media.type}
-                                            className="rounded-md max-w-full max-h-60 object-contain"
-                                          />
-                                        ) : message.media.type === "voice" || message.media.type === "audio" ? (
-                                          <audio controls className="w-full">
-                                            <source src={message.media.url} type={message.media.mimeType} />
-                                            Your browser does not support the audio element.
-                                          </audio>
-                                        ) : (
-                                          <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
-                                            <File className="h-5 w-5" />
-                                            <div className="flex-1 overflow-hidden">
-                                              <div className="truncate font-medium">
-                                                {message.media.fileName || "Document"}
-                                              </div>
-                                              <div className="text-xs text-muted-foreground">
-                                                {message.media.mimeType}
-                                              </div>
-                                            </div>
-                                            <Button variant="outline" size="sm" asChild>
-                                              <a
-                                                href={message.media.url}
-                                                download
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                              >
-                                                Download
-                                              </a>
-                                            </Button>
-                                          </div>
-                                        )
-                                      ) : (
-                                        <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
-                                          {renderMediaIcon(message.media.type)}
-                                          <span className="text-sm">{message.media.type}</span>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() =>
-                                              handleLoadMedia(
-                                                selectedAccount,
-                                                selectedChat,
-                                                message.id,
-                                                message.media.type,
-                                              )
-                                            }
-                                          >
-                                            Load
-                                          </Button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Sticker */}
-                                  {message.sticker && (
-                                    <div className="mb-2">
-                                      {message.sticker.thumbnail ? (
-                                        <img
-                                          src={message.sticker.thumbnail || "/placeholder.svg"}
-                                          alt={message.sticker.emoji || "Sticker"}
-                                          className="max-w-[128px] max-h-[128px]"
-                                        />
-                                      ) : (
-                                        <div className="flex items-center justify-center w-24 h-24 bg-muted rounded-md">
-                                          <span className="text-2xl">{message.sticker.emoji || "🌟"}</span>
-                                        </div>
-                                      )}
+                                      <img
+                                        src={message.media || "/placeholder.svg"}
+                                        alt="Media"
+                                        className="rounded-md max-w-full max-h-60 object-contain"
+                                      />
                                     </div>
                                   )}
 
                                   {/* Message text */}
-                                  {message.text && <div>{message.text}</div>}
+                                  <div>{message.text || ""}</div>
 
                                   {/* Message metadata */}
-                                  <div className="message-metadata">
+                                  <div className="text-xs mt-1 flex justify-end items-center gap-1">
                                     {message.edited && <Edit className="h-3 w-3" />}
                                     {message.forwarded && <Forward className="h-3 w-3" />}
                                     {formatTime(message.timestamp)}
                                     {message.isFromMe &&
                                       (message.id.startsWith("temp-") ? (
                                         <Loader2 className="h-3 w-3 animate-spin" />
-                                      ) : message.readState?.isRead ? (
-                                        <CheckCheck className="h-3 w-3" />
                                       ) : (
-                                        <CheckCheck className="h-3 w-3 text-muted-foreground/50" />
+                                        <CheckCheck className="h-3 w-3" />
                                       ))}
                                   </div>
                                 </div>
 
                                 {/* Message actions */}
                                 <div
-                                  className={`message-actions ${
-                                    message.isFromMe ? "message-actions-from-me" : "message-actions-from-other"
-                                  }`}
+                                  className={`absolute top-0 ${message.isFromMe ? "left-0 -translate-x-full" : "right-0 translate-x-full"} opacity-0 group-hover:opacity-100 transition-opacity`}
                                 >
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-7 w-7 rounded-full"
-                                          onClick={() => setReplyingTo(message)}
-                                        >
-                                          <Reply className="h-3.5 w-3.5" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom" align="center">
-                                        Reply
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
+                                  <div className="flex flex-col gap-1 p-1 bg-background border border-border rounded-md shadow-sm">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6"
+                                      onClick={() => setReplyingTo(message)}
+                                    >
+                                      <Reply className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -1586,9 +1311,8 @@ export default function TelegramManager() {
                 </div>
               )}
 
-              {/* Update the message input area */}
-              <div className="p-4 border-t border-border bg-background sticky bottom-0 z-10">
-                <form onSubmit={handleSendMessage} className="flex gap-3 items-center">
+              <div className="p-3 border-t border-border">
+                <form onSubmit={handleSendMessage} className="flex gap-2">
                   <Input
                     value={messageInput}
                     onChange={(e) => {
@@ -1603,12 +1327,11 @@ export default function TelegramManager() {
                         : "Type a message..."
                     }
                     disabled={sendingMessage || !canSendMessages()}
-                    className="flex-1 rounded-full bg-muted border-0 focus-visible:ring-1 focus-visible:ring-primary"
+                    className="flex-1"
                   />
                   <Button
                     type="submit"
                     size="icon"
-                    className="h-10 w-10 rounded-full"
                     disabled={sendingMessage || !messageInput.trim() || !canSendMessages()}
                   >
                     {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
