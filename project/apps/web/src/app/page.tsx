@@ -335,7 +335,37 @@ export default function TelegramManager() {
 
           // Mark as read
           socketInstance.emit("markAsRead", { accountId, chatId })
+        } else {
+          // If we're not viewing this chat, still update the messages state
+          setMessages((prev) => {
+            const accountMessages = prev[accountId] || {}
+            const chatMessages = accountMessages[chatId] || []
+            return {
+              ...prev,
+              [accountId]: {
+                ...accountMessages,
+                [chatId]: [...chatMessages, message],
+              },
+            }
+          })
         }
+
+        // Update chat list with new message
+        setChats((prev) => {
+          const accountChats = prev[accountId] || []
+          return {
+            ...prev,
+            [accountId]: accountChats.map((chat) =>
+              chat.id === chatId
+                ? {
+                    ...chat,
+                    lastMessage: message,
+                    unreadCount: selectedAccount === accountId && selectedChat === chatId ? 0 : (chat.unreadCount || 0) + 1,
+                  }
+                : chat,
+            ),
+          }
+        })
 
         // Add to notifications
         setNotifications((prev) => [...prev, { accountId, chatId, message, read: false }])
@@ -356,30 +386,6 @@ export default function TelegramManager() {
             </Button>
           ),
         })
-
-        // Update chat unread count and lastMessage
-        setChats((prev) => {
-          const accountChats = prev[accountId] || []
-          return {
-            ...prev,
-            [accountId]: accountChats.map((chat) =>
-              chat.id === chatId
-                ? {
-                    ...chat,
-                    unreadCount: (chat.unreadCount || 0) + 1,
-                    lastMessage: message,
-                  }
-                : chat,
-            ),
-          }
-        })
-
-        // Update account unread count
-        setAccounts((prev) =>
-          prev.map((account) =>
-            account.id === accountId ? { ...account, unreadCount: (account.unreadCount || 0) + 1 } : account,
-          ),
-        )
       },
     )
 
@@ -1270,6 +1276,20 @@ export default function TelegramManager() {
                                   className={`absolute top-0 ${message.isFromMe ? "left-0 -translate-x-full" : "right-0 translate-x-full"} opacity-0 group-hover:opacity-100 transition-opacity`}
                                 >
                                   <div className="flex flex-col gap-1 p-1 bg-background border border-border rounded-md shadow-sm">
+                                    {!message.isFromMe && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6"
+                                        onClick={() => {
+                                          if (socket && selectedAccount && selectedChat) {
+                                            socket.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
+                                          }
+                                        }}
+                                      >
+                                        <CheckCheck className="h-3 w-3" />
+                                      </Button>
+                                    )}
                                     <Button
                                       variant="ghost"
                                       size="icon"
