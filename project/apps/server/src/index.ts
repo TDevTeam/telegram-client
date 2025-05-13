@@ -3,6 +3,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { TelegramManager } from "./telegram/manager.js";
+import { FeedManager } from "./feed/manager.js";
 import { config } from "./config.js";
 
 const app = express();
@@ -26,10 +27,19 @@ app.use(cors({
 app.use(express.json());
 
 const manager = new TelegramManager();
+const feedManager = new FeedManager();
 
 // Set up real-time event handlers
-manager.on('newMessage', (data) => {
+manager.on('newMessage', async (data) => {
   io.emit('messageReceived', data);
+  
+  // Add message to feed if it's not from self
+  if (!data.message.isFromMe) {
+    const feedMessage = await feedManager.addMessage(data.accountId, data.chatId, data.message);
+    if (feedMessage) {
+      io.emit('feedUpdate', feedMessage);
+    }
+  }
 });
 
 manager.on('typingUpdate', (data) => {
@@ -39,6 +49,11 @@ manager.on('typingUpdate', (data) => {
 manager.on('unreadCountUpdate', (data) => {
   io.emit('unreadCountUpdated', data);
 });
+
+// Cleanup feed periodically
+setInterval(() => {
+  feedManager.cleanup();
+}, 24 * 60 * 60 * 1000); // Run cleanup once per day
 
 io.on("connection", (socket) => {
   console.log("Client connected");
@@ -51,7 +66,8 @@ io.on("connection", (socket) => {
 
   socket.on("getChats", (accountId: string) => {
     const chats = manager.getChats(accountId);
-    socket.emit("chats", { accountId, chats: Array.from(chats.values()) });  });
+    socket.emit("chats", { accountId, chats: Array.from(chats.values()) });
+  });
 
   socket.on("getMessages", async (accountId: string, chatId: string) => {
     try {
@@ -100,6 +116,17 @@ io.on("connection", (socket) => {
         error: error.message 
       });
     }
+  });
+
+  // Feed-related events
+  socket.on("getFeed", async () => {
+    const messages = feedManager.getActiveMessages();
+    socket.emit("feed", messages);
+  });
+
+  socket.on("dismissFeedMessage", async (messageId: string) => {
+    await feedManager.dismissMessage(messageId);
+    socket.emit("feedMessageDismissed", messageId);
   });
 
   socket.on("disconnect", () => {

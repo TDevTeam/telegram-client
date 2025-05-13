@@ -27,6 +27,8 @@ import {
   Edit,
   CheckCheck,
   MoreVertical,
+  BellOff,
+  Home,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
@@ -55,6 +57,7 @@ interface Chat {
   permissions?: ChatPermissions
   cooldown?: number // Cooldown in seconds
   participants?: ChatParticipant[]
+  muted?: boolean // Add muted property
 }
 
 interface Message {
@@ -129,6 +132,15 @@ export default function TelegramManager() {
     chats: false,
     messages: false,
   })
+  const [activeTab, setActiveTab] = useState<"chats" | "feed">("chats")
+  const [feedMessages, setFeedMessages] = useState<{
+    id: string;
+    accountId: string;
+    chatId: string;
+    message: Message;
+    timestamp: number;
+    dismissed: boolean;
+  }[]>([])
 
   // Navigation target ref for handling notification clicks
   const navigationTargetRef = useRef<NavigationTarget | null>(null)
@@ -152,6 +164,7 @@ export default function TelegramManager() {
       setConnected(true)
       setLoading((prev) => ({ ...prev, accounts: true }))
       socketInstance.emit("getAccounts")
+      socketInstance.emit("getFeed")
     })
 
     socketInstance.on("disconnect", () => {
@@ -461,6 +474,21 @@ export default function TelegramManager() {
     socketInstance.onAny((event, ...args) => {
       console.log(`Received event: ${event}`, args)
     })
+
+    socketInstance.on("feed", (messages) => {
+      console.log("Received feed messages:", messages);
+      setFeedMessages(messages);
+    });
+
+    socketInstance.on("feedUpdate", (message) => {
+      console.log("New feed message:", message);
+      setFeedMessages(prev => [message, ...prev]);
+    });
+
+    socketInstance.on("feedMessageDismissed", (messageId) => {
+      console.log("Feed message dismissed:", messageId);
+      setFeedMessages(prev => prev.filter(m => m.id !== messageId));
+    });
 
     setSocket(socketInstance)
 
@@ -775,6 +803,130 @@ export default function TelegramManager() {
     return true
   }, [selectedAccount, selectedChat, chats, cooldowns])
 
+  // Add toggle mute function
+  const toggleMute = async (chatId: string) => {
+    if (!selectedAccount || !socket) return
+
+    const chat = chats[selectedAccount]?.find((c) => c.id === chatId)
+    if (!chat) return
+
+    try {
+      socket.emit("toggleMute", { accountId: selectedAccount, chatId, mute: !chat.muted })
+      
+      // Optimistically update UI
+      setChats((prev) => ({
+        ...prev,
+        [selectedAccount]: prev[selectedAccount].map((c) =>
+          c.id === chatId ? { ...c, muted: !c.muted } : c
+        ),
+      }))
+
+      toast({
+        title: chat.muted ? "Chat unmuted" : "Chat muted",
+        description: `Notifications for ${chat.title} have been ${chat.muted ? "enabled" : "disabled"}`,
+      })
+    } catch (error) {
+      console.error("Error toggling mute:", error)
+      toast({
+        title: "Error",
+        description: "Failed to update notification settings",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Feed tab content
+  const renderFeed = () => (
+    <div className="flex-1 overflow-hidden">
+      <ScrollArea className="h-full">
+        <div className="p-4 space-y-4">
+          {feedMessages.map(({ id, accountId, chatId, message }) => {
+            const account = accounts.find(a => a.id === accountId);
+            const chat = chats[accountId]?.find(c => c.id === chatId);
+            
+            if (!account || !chat) return null;
+
+            return (
+              <div key={id} className="border rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Avatar className="h-8 w-8 flex-shrink-0">
+                    {account.avatar ? (
+                      <AvatarImage src={account.avatar} alt={account.displayName} />
+                    ) : (
+                      <AvatarFallback>{getInitials(account.displayName)}</AvatarFallback>
+                    )}
+                  </Avatar>
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{account.displayName}</div>
+                    <div className="text-sm text-muted-foreground truncate">{chat.title}</div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto"
+                    onClick={() => socket?.emit("dismissFeedMessage", id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                
+                <div className="pl-10">
+                  {message.sender && !message.isFromMe && (
+                    <div className="flex items-center gap-2 mb-1">
+                      <Avatar className="h-6 w-6 flex-shrink-0">
+                        {message.sender.avatar ? (
+                          <AvatarImage src={message.sender.avatar} alt={message.sender.name} />
+                        ) : (
+                          <AvatarFallback>{getInitials(message.sender.name)}</AvatarFallback>
+                        )}
+                      </Avatar>
+                      <span className="text-sm font-medium truncate">{message.sender.name}</span>
+                    </div>
+                  )}
+
+                  <div className="bg-card text-card-foreground border border-border rounded-lg p-3">
+                    {message.media && (
+                      <div className="mb-2">
+                        <img
+                          src={message.media}
+                          alt="Media"
+                          className="rounded-md max-w-full max-h-60 object-contain"
+                        />
+                      </div>
+                    )}
+                    <div className="break-words">{message.text}</div>
+                    <div className="text-xs mt-1 flex justify-end items-center gap-1">
+                      {message.edited && <Edit className="h-3 w-3" />}
+                      {message.forwarded && <Forward className="h-3 w-3" />}
+                      {formatTime(message.timestamp)}
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => {
+                        setSelectedAccount(accountId);
+                        setSelectedChat(chatId);
+                        setActiveTab("chats");
+                        setReplyingTo(message);
+                      }}
+                    >
+                      <Reply className="h-4 w-4 mr-2" />
+                      Reply
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-screen bg-background">
       <header className="bg-background border-b border-border py-3 px-4 flex justify-between items-center">
@@ -914,64 +1066,6 @@ export default function TelegramManager() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Notification indicator */}
-          {notifications.filter((n) => !n.read).length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="relative">
-                  <Bell className="h-5 w-5" />
-                  <Badge
-                    variant="destructive"
-                    className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0"
-                  >
-                    {notifications.filter((n) => !n.read).length}
-                  </Badge>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80">
-                <div className="p-2 font-semibold border-b">Notifications</div>
-                <ScrollArea className="h-80">
-                  {notifications
-                    .filter((n) => !n.read)
-                    .map((notification, index) => {
-                      const chat = chats[notification.accountId]?.find((c) => c.id === notification.chatId)
-                      const account = accounts.find((a) => a.id === notification.accountId)
-
-                      return (
-                        <div
-                          key={index}
-                          className="p-2 border-b cursor-pointer hover:bg-accent"
-                          onClick={() => {
-                            navigateToChat(notification.accountId, notification.chatId, index)
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-8 w-8">
-                              {chat?.avatar ? (
-                                <AvatarImage src={chat.avatar} alt={chat.title} />
-                              ) : (
-                                <AvatarFallback>{chat ? getInitials(chat.title) : "?"}</AvatarFallback>
-                              )}
-                            </Avatar>
-                            <div>
-                              <div className="font-medium">{chat?.title || "Unknown chat"}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {account?.displayName || "Unknown account"}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-1 text-sm">{notification.message.text}</div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {formatTime(notification.message.timestamp)}
-                          </div>
-                        </div>
-                      )
-                    })}
-                </ScrollArea>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </Button>
@@ -980,7 +1074,7 @@ export default function TelegramManager() {
         </div>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
+      <main className="flex-1 flex overflow-hidden">
         {/* Sidebar - Accounts */}
         <div className="w-64 border-r border-border hidden md:flex flex-col">
           <div className="p-4 border-b border-border flex justify-between items-center">
@@ -991,9 +1085,9 @@ export default function TelegramManager() {
           <ScrollArea className="flex-1">
             {loading.accounts ? (
               <div className="p-4 flex flex-col gap-4">
-                <div className="h-12 bg-muted animate-pulse rounded-md"></div>
-                <div className="h-12 bg-muted animate-pulse rounded-md"></div>
-                <div className="h-12 bg-muted animate-pulse rounded-md"></div>
+                <div className="h-16 bg-muted animate-pulse rounded-md"></div>
+                <div className="h-16 bg-muted animate-pulse rounded-md"></div>
+                <div className="h-16 bg-muted animate-pulse rounded-md"></div>
               </div>
             ) : accounts.length > 0 ? (
               <div className="p-2">
@@ -1001,7 +1095,7 @@ export default function TelegramManager() {
                   <div key={account.id} className="relative group">
                     <Button
                       variant={selectedAccount === account.id ? "default" : "ghost"}
-                      className="w-full justify-start mb-1 text-left pr-10"
+                      className="w-full justify-start mb-1 text-left h-auto py-3"
                       onClick={() => handleAccountSelect(account.id)}
                     >
                       <div className="flex items-center gap-2 w-full">
@@ -1041,332 +1135,369 @@ export default function TelegramManager() {
           </ScrollArea>
         </div>
 
-        {/* Sidebar - Chats */}
-        {selectedAccount && (
-          <div className="w-72 border-r border-border hidden md:flex flex-col">
-            <div className="p-4 border-b border-border flex justify-between items-center">
-              <h2 className="text-lg font-semibold">Chats</h2>
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* Tab Navigation */}
+          <div className="border-b border-border flex-shrink-0">
+            <div className="flex">
+              <Button
+                variant={activeTab === "chats" ? "default" : "ghost"}
+                className="rounded-none"
+                onClick={() => setActiveTab("chats")}
+              >
+                <MessageSquare className="h-4 w-4 mr-2" />
+                Chats
+              </Button>
+              <Button
+                variant={activeTab === "feed" ? "default" : "ghost"}
+                className="rounded-none"
+                onClick={() => setActiveTab("feed")}
+              >
+                <Home className="h-4 w-4 mr-2" />
+                Feed
+              </Button>
             </div>
-            <ScrollArea className="flex-1">
-              {loading.chats ? (
-                <div className="p-4 flex flex-col gap-4">
-                  <div className="h-16 bg-muted animate-pulse rounded-md"></div>
-                  <div className="h-16 bg-muted animate-pulse rounded-md"></div>
-                  <div className="h-16 bg-muted animate-pulse rounded-md"></div>
-                </div>
-              ) : chats[selectedAccount]?.length > 0 ? (
-                <div className="p-2">
-                  {chats[selectedAccount].map((chat) => (
-                    <Button
-                      key={chat.id}
-                      variant={selectedChat === chat.id ? "default" : "ghost"}
-                      className="w-full justify-start mb-1 text-left h-auto py-3"
-                      onClick={() => handleChatSelect(chat.id)}
-                    >
-                      <div className="flex items-center gap-2 w-full">
-                        <Avatar className="h-8 w-8">
-                          {chat.avatar ? (
-                            <AvatarImage src={chat.avatar} alt={chat.title} />
-                          ) : (
-                            <AvatarFallback>{getInitials(chat.title)}</AvatarFallback>
-                          )}
-                        </Avatar>
-                        <div className="flex flex-col items-start flex-1">
-                          <div className="flex justify-between w-full">
-                            <span className="font-medium truncate flex items-center gap-1">
-                              {chat.title}
-                              {chat.isGroup && <Users className="h-3 w-3" />}
-                            </span>
-                            {chat.unreadCount > 0 && (
-                              <Badge variant="destructive" className="ml-2">
-                                {chat.unreadCount}
-                              </Badge>
-                            )}
-                          </div>
-                          {chat.lastMessage && (
-                            <div className="text-xs text-muted-foreground mt-1 truncate w-full">
-                              {chat.lastMessage.text}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 text-center text-muted-foreground">
-                  {connected ? "No chats found" : "Loading chats..."}
-                </div>
-              )}
-            </ScrollArea>
           </div>
-        )}
 
-        {/* Main content - Messages */}
-        <div className="flex-1 flex flex-col">
-          {selectedAccount && selectedChat ? (
-            <>
-              <div className="p-3 border-b border-border flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <Avatar className="h-8 w-8">
-                    {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.avatar ? (
-                      <AvatarImage
-                        src={chats[selectedAccount]?.find((c) => c.id === selectedChat)?.avatar || ""}
-                        alt={chats[selectedAccount]?.find((c) => c.id === selectedChat)?.title || "Chat"}
-                      />
-                    ) : (
-                      <AvatarFallback>
-                        {getInitials(chats[selectedAccount]?.find((c) => c.id === selectedChat)?.title || "Chat")}
-                      </AvatarFallback>
-                    )}
-                  </Avatar>
-                  <div>
-                    <h2 className="font-semibold truncate">
-                      {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.title || "Chat"}
-                    </h2>
-
-                    {/* Typing indicator */}
-                    {typingUsers[selectedAccount]?.[selectedChat]?.length > 0 && (
-                      <div className="text-xs text-muted-foreground">
-                        {typingUsers[selectedAccount][selectedChat].length === 1
-                          ? `${typingUsers[selectedAccount][selectedChat][0]} is typing...`
-                          : `${typingUsers[selectedAccount][selectedChat].length} people are typing...`}
-                      </div>
-                    )}
+          {/* Content Area */}
+          {activeTab === "chats" ? (
+            <div className="flex-1 flex min-w-0 overflow-hidden">
+              {/* Sidebar - Chats */}
+              {selectedAccount && (
+                <div className="w-72 border-r border-border hidden md:flex flex-col flex-shrink-0">
+                  <div className="p-4 border-b border-border flex justify-between items-center">
+                    <h2 className="text-lg font-semibold">Chats</h2>
                   </div>
-                </div>
-
-                {/* Chat info and permissions */}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-2">
-                        {cooldowns[selectedAccount]?.[selectedChat] > 0 && (
-                          <div className="flex items-center text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {cooldowns[selectedAccount][selectedChat]}s
-                          </div>
-                        )}
-
-                        {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.permissions?.canSendMessages ===
-                          false && <Lock className="h-4 w-4 text-muted-foreground" />}
-
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() =>
-                                socket?.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
-                              }
-                            >
-                              Mark as Read
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                  <ScrollArea className="flex-1">
+                    {loading.chats ? (
+                      <div className="p-4 flex flex-col gap-4">
+                        <div className="h-16 bg-muted animate-pulse rounded-md"></div>
+                        <div className="h-16 bg-muted animate-pulse rounded-md"></div>
+                        <div className="h-16 bg-muted animate-pulse rounded-md"></div>
                       </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {cooldowns[selectedAccount]?.[selectedChat] > 0
-                        ? `Cooldown: ${cooldowns[selectedAccount][selectedChat]} seconds remaining`
-                        : chats[selectedAccount]?.find((c) => c.id === selectedChat)?.permissions?.canSendMessages ===
-                            false
-                          ? "You cannot send messages in this chat"
-                          : "Chat info"}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-
-              <ScrollArea className="flex-1 p-4">
-                {loading.messages ? (
-                  <div className="flex flex-col gap-4">
-                    <div className="h-20 bg-muted animate-pulse rounded-md"></div>
-                    <div className="h-20 bg-muted animate-pulse rounded-md self-end"></div>
-                    <div className="h-20 bg-muted animate-pulse rounded-md"></div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {messages[selectedAccount]?.[selectedChat]?.length > 0 ? (
-                      groupMessagesByDate(messages[selectedAccount][selectedChat]).map(([date, dateMessages]) => (
-                        <div key={date} className="space-y-3">
-                          <div className="text-center">
-                            <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-md">{date}</span>
-                          </div>
-
-                          {dateMessages.map((message) => (
-                            <div
-                              key={message.id}
-                              className={`flex ${message.isFromMe ? "justify-end" : "justify-start"}`}
-                            >
-                              <div className="relative group max-w-[70%]">
-                                {!message.isFromMe && message.sender && (
-                                  <div className="flex items-center mb-1">
-                                    <Avatar className="h-6 w-6 mr-1">
-                                      {message.sender.avatar ? (
-                                        <AvatarImage src={message.sender.avatar} alt={message.sender.name} />
-                                      ) : (
-                                        <AvatarFallback>{getInitials(message.sender.name)}</AvatarFallback>
-                                      )}
-                                    </Avatar>
-                                    <span className="text-xs font-medium">{message.sender.name}</span>
-                                  </div>
+                    ) : chats[selectedAccount]?.length > 0 ? (
+                      <div className="p-2">
+                        {chats[selectedAccount].map((chat) => (
+                          <Button
+                            key={chat.id}
+                            variant={selectedChat === chat.id ? "default" : "ghost"}
+                            className="w-full justify-start mb-1 text-left h-auto py-3"
+                            onClick={() => handleChatSelect(chat.id)}
+                          >
+                            <div className="flex items-center gap-2 w-full">
+                              <Avatar className="h-8 w-8">
+                                {chat.avatar ? (
+                                  <AvatarImage src={chat.avatar} alt={chat.title} />
+                                ) : (
+                                  <AvatarFallback>{getInitials(chat.title)}</AvatarFallback>
                                 )}
-
-                                {/* Reply reference */}
-                                {message.replyTo && (
-                                  <div
-                                    className={`text-xs p-2 rounded-t-lg border-l-2 ${
-                                      message.isFromMe
-                                        ? "bg-primary/20 border-primary-foreground"
-                                        : "bg-card/50 border-card-foreground/30"
-                                    }`}
-                                  >
-                                    <div className="font-medium">
-                                      {findMessageById(selectedAccount, selectedChat, message.replyTo)?.sender?.name ||
-                                        "Reply to"}
-                                    </div>
-                                    <div className="truncate">
-                                      {findMessageById(selectedAccount, selectedChat, message.replyTo)?.text ||
-                                        "Message"}
-                                    </div>
-                                  </div>
-                                )}
-
-                                <div
-                                  className={`p-3 rounded-lg ${message.replyTo ? "rounded-t-none" : ""} ${
-                                    message.isFromMe
-                                      ? "bg-primary text-primary-foreground"
-                                      : "bg-card text-card-foreground border border-border"
-                                  }`}
-                                >
-                                  {/* Message media */}
-                                  {message.media && (
-                                    <div className="mb-2">
-                                      <img
-                                        src={message.media || "/placeholder.svg"}
-                                        alt="Media"
-                                        className="rounded-md max-w-full max-h-60 object-contain"
-                                      />
-                                    </div>
+                              </Avatar>
+                              <div className="flex flex-col items-start flex-1">
+                                <div className="flex justify-between w-full">
+                                  <span className="font-medium truncate flex items-center gap-1">
+                                    {chat.title}
+                                    {chat.isGroup && <Users className="h-3 w-3" />}
+                                  </span>
+                                  {chat.unreadCount > 0 && (
+                                    <Badge variant="destructive" className="ml-2">
+                                      {chat.unreadCount}
+                                    </Badge>
                                   )}
-
-                                  {/* Message text */}
-                                  <div>{message.text || ""}</div>
-
-                                  {/* Message metadata */}
-                                  <div className="text-xs mt-1 flex justify-end items-center gap-1">
-                                    {message.edited && <Edit className="h-3 w-3" />}
-                                    {message.forwarded && <Forward className="h-3 w-3" />}
-                                    {formatTime(message.timestamp)}
-                                    {message.isFromMe &&
-                                      (message.id.startsWith("temp-") ? (
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                      ) : (
-                                        <CheckCheck className="h-3 w-3" />
-                                      ))}
-                                  </div>
                                 </div>
-
-                                {/* Message actions */}
-                                <div
-                                  className={`absolute top-0 ${message.isFromMe ? "left-0 -translate-x-full" : "right-0 translate-x-full"} opacity-0 group-hover:opacity-100 transition-opacity`}
-                                >
-                                  <div className="flex flex-col gap-1 p-1 bg-background border border-border rounded-md shadow-sm">
-                                    {!message.isFromMe && (
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-6 w-6"
-                                        onClick={() => {
-                                          if (socket && selectedAccount && selectedChat) {
-                                            socket.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
-                                          }
-                                        }}
-                                      >
-                                        <CheckCheck className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6"
-                                      onClick={() => setReplyingTo(message)}
-                                    >
-                                      <Reply className="h-3 w-3" />
-                                    </Button>
+                                {chat.lastMessage && (
+                                  <div className="text-xs text-muted-foreground mt-1 truncate w-full">
+                                    {chat.lastMessage.text}
                                   </div>
-                                </div>
+                                )}
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-center text-muted-foreground py-8">No messages yet</div>
-                    )}
-                    <div ref={messagesEndRef} />
-                  </div>
-                )}
-              </ScrollArea>
-
-              {/* Reply indicator */}
-              {replyingTo && (
-                <div className="p-2 border-t border-border bg-muted/30 flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <Reply className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <div className="text-xs text-muted-foreground">
-                        Replying to {replyingTo.sender?.name || (replyingTo.isFromMe ? "yourself" : "message")}
+                          </Button>
+                        ))}
                       </div>
-                      <div className="text-sm truncate max-w-[200px] md:max-w-[400px]">{replyingTo.text}</div>
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="icon" onClick={() => setReplyingTo(null)}>
-                    <X className="h-4 w-4" />
-                  </Button>
+                    ) : (
+                      <div className="p-4 text-center text-muted-foreground">
+                        {connected ? "No chats found" : "Loading chats..."}
+                      </div>
+                    )}
+                  </ScrollArea>
                 </div>
               )}
 
-              <div className="p-3 border-t border-border">
-                <form onSubmit={handleSendMessage} className="flex gap-2">
-                  <Input
-                    value={messageInput}
-                    onChange={(e) => {
-                      setMessageInput(e.target.value)
-                      handleTyping()
-                    }}
-                    placeholder={
-                      !canSendMessages()
-                        ? cooldowns[selectedAccount]?.[selectedChat] > 0
-                          ? `Cooldown: ${cooldowns[selectedAccount][selectedChat]}s remaining`
-                          : "You cannot send messages in this chat"
-                        : "Type a message..."
-                    }
-                    disabled={sendingMessage || !canSendMessages()}
-                    className="flex-1"
-                  />
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={sendingMessage || !messageInput.trim() || !canSendMessages()}
-                  >
-                    {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </form>
+              {/* Main content - Messages */}
+              <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                {selectedAccount && selectedChat ? (
+                  <>
+                    <div className="p-3 border-b border-border flex justify-between items-center flex-shrink-0">
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-8 w-8">
+                          {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.avatar ? (
+                            <AvatarImage
+                              src={chats[selectedAccount]?.find((c) => c.id === selectedChat)?.avatar || ""}
+                              alt={chats[selectedAccount]?.find((c) => c.id === selectedChat)?.title || "Chat"}
+                            />
+                          ) : (
+                            <AvatarFallback>
+                              {getInitials(chats[selectedAccount]?.find((c) => c.id === selectedChat)?.title || "Chat")}
+                            </AvatarFallback>
+                          )}
+                        </Avatar>
+                        <div>
+                          <h2 className="font-semibold truncate">
+                            {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.title || "Chat"}
+                          </h2>
+
+                          {/* Typing indicator */}
+                          {typingUsers[selectedAccount]?.[selectedChat]?.length > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {typingUsers[selectedAccount][selectedChat].length === 1
+                                ? `${typingUsers[selectedAccount][selectedChat][0]} is typing...`
+                                : `${typingUsers[selectedAccount][selectedChat].length} people are typing...`}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Chat info and permissions */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center gap-2">
+                              {cooldowns[selectedAccount]?.[selectedChat] > 0 && (
+                                <div className="flex items-center text-xs text-muted-foreground">
+                                  <Clock className="h-3 w-3 mr-1" />
+                                  {cooldowns[selectedAccount][selectedChat]}s
+                                </div>
+                              )}
+
+                              {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.permissions?.canSendMessages ===
+                                false && <Lock className="h-4 w-4 text-muted-foreground" />}
+
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => toggleMute(selectedChat)}>
+                                    {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.muted ? (
+                                      <>
+                                        <BellOff className="mr-2 h-4 w-4" />
+                                        <span>Unmute Notifications</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Bell className="mr-2 h-4 w-4" />
+                                        <span>Mute Notifications</span>
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      socket?.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
+                                    }
+                                  >
+                                    Mark as Read
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {cooldowns[selectedAccount]?.[selectedChat] > 0
+                              ? `Cooldown: ${cooldowns[selectedAccount][selectedChat]} seconds remaining`
+                              : chats[selectedAccount]?.find((c) => c.id === selectedChat)?.permissions?.canSendMessages ===
+                                  false
+                                ? "You cannot send messages in this chat"
+                                : "Chat info"}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+
+                    <ScrollArea className="flex-1">
+                      <div className="p-4 space-y-4">
+                        {messages[selectedAccount]?.[selectedChat]?.length > 0 ? (
+                          groupMessagesByDate(messages[selectedAccount][selectedChat]).map(([date, dateMessages]) => (
+                            <div key={date} className="space-y-3">
+                              <div className="text-center">
+                                <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-md">{date}</span>
+                              </div>
+
+                              {dateMessages.map((message) => (
+                                <div
+                                  key={message.id}
+                                  className={`flex ${message.isFromMe ? "justify-end" : "justify-start"}`}
+                                >
+                                  <div className="relative group max-w-[75%]">
+                                    {!message.isFromMe && message.sender && (
+                                      <div className="flex items-center mb-1">
+                                        <Avatar className="h-6 w-6 mr-1 flex-shrink-0">
+                                          {message.sender.avatar ? (
+                                            <AvatarImage src={message.sender.avatar} alt={message.sender.name} />
+                                          ) : (
+                                            <AvatarFallback>{getInitials(message.sender.name)}</AvatarFallback>
+                                          )}
+                                        </Avatar>
+                                        <span className="text-xs font-medium truncate">{message.sender.name}</span>
+                                      </div>
+                                    )}
+
+                                    {/* Reply reference */}
+                                    {message.replyTo && (
+                                      <div
+                                        className={`text-xs p-2 rounded-t-lg border-l-2 ${
+                                          message.isFromMe
+                                            ? "bg-primary/20 border-primary-foreground"
+                                            : "bg-card/50 border-card-foreground/30"
+                                        }`}
+                                      >
+                                        <div className="font-medium truncate">
+                                          {findMessageById(selectedAccount, selectedChat, message.replyTo)?.sender?.name ||
+                                            "Reply to"}
+                                        </div>
+                                        <div className="truncate">
+                                          {findMessageById(selectedAccount, selectedChat, message.replyTo)?.text ||
+                                            "Message"}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div
+                                      className={`p-3 rounded-lg ${message.replyTo ? "rounded-t-none" : ""} ${
+                                        message.isFromMe
+                                          ? "bg-primary text-primary-foreground"
+                                          : "bg-card text-card-foreground border border-border"
+                                      }`}
+                                    >
+                                      {/* Message media */}
+                                      {message.media && (
+                                        <div className="mb-2">
+                                          <img
+                                            src={message.media || "/placeholder.svg"}
+                                            alt="Media"
+                                            className="rounded-md max-w-full max-h-60 object-contain"
+                                          />
+                                        </div>
+                                      )}
+
+                                      {/* Message text */}
+                                      <div className="break-words">{message.text || ""}</div>
+
+                                      {/* Message metadata */}
+                                      <div className="text-xs mt-1 flex justify-end items-center gap-1">
+                                        {message.edited && <Edit className="h-3 w-3" />}
+                                        {message.forwarded && <Forward className="h-3 w-3" />}
+                                        {formatTime(message.timestamp)}
+                                        {message.isFromMe &&
+                                          (message.id.startsWith("temp-") ? (
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                          ) : (
+                                            <CheckCheck className="h-3 w-3" />
+                                          ))}
+                                      </div>
+                                    </div>
+
+                                    {/* Message actions */}
+                                    <div
+                                      className={`absolute top-0 ${message.isFromMe ? "left-0 -translate-x-full" : "right-0 translate-x-full"} opacity-0 group-hover:opacity-100 transition-opacity`}
+                                    >
+                                      <div className="flex flex-col gap-1 p-1 bg-background border border-border rounded-md shadow-sm">
+                                        {!message.isFromMe && (
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6"
+                                            onClick={() => {
+                                              if (socket && selectedAccount && selectedChat) {
+                                                socket.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
+                                              }
+                                            }}
+                                          >
+                                            <CheckCheck className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-6 w-6"
+                                          onClick={() => setReplyingTo(message)}
+                                        >
+                                          <Reply className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center text-muted-foreground py-8">No messages yet</div>
+                        )}
+                        <div ref={messagesEndRef} />
+                      </div>
+                    </ScrollArea>
+
+                    {/* Reply indicator */}
+                    {replyingTo && (
+                      <div className="p-2 border-t border-border bg-muted/30 flex justify-between items-center flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                          <Reply className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <div className="text-xs text-muted-foreground">
+                              Replying to {replyingTo.sender?.name || (replyingTo.isFromMe ? "yourself" : "message")}
+                            </div>
+                            <div className="text-sm truncate max-w-[200px] md:max-w-[400px]">{replyingTo.text}</div>
+                          </div>
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={() => setReplyingTo(null)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+
+                    <div className="p-3 border-t border-border flex-shrink-0">
+                      <form onSubmit={handleSendMessage} className="flex gap-2">
+                        <Input
+                          value={messageInput}
+                          onChange={(e) => {
+                            setMessageInput(e.target.value)
+                            handleTyping()
+                          }}
+                          placeholder={
+                            !canSendMessages()
+                              ? cooldowns[selectedAccount]?.[selectedChat] > 0
+                                ? `Cooldown: ${cooldowns[selectedAccount][selectedChat]}s remaining`
+                                : "You cannot send messages in this chat"
+                              : "Type a message..."
+                          }
+                          disabled={sendingMessage || !canSendMessages()}
+                          className="flex-1"
+                        />
+                        <Button
+                          type="submit"
+                          size="icon"
+                          disabled={sendingMessage || !messageInput.trim() || !canSendMessages()}
+                        >
+                          {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        </Button>
+                      </form>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                    {selectedAccount
+                      ? "Select a chat to start messaging"
+                      : accounts.length > 0
+                        ? "Select an account"
+                        : "No accounts available"}
+                  </div>
+                )}
               </div>
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
-              {selectedAccount
-                ? "Select a chat to start messaging"
-                : accounts.length > 0
-                  ? "Select an account"
-                  : "No accounts available"}
             </div>
+          ) : (
+            renderFeed()
           )}
         </div>
       </main>

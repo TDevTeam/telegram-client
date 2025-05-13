@@ -494,29 +494,22 @@ export class TelegramManager extends EventEmitter {
       const entity = await account.client.getEntity(chatId);
       
       let peer;
-      if (chat.isGroup) {
-        if (entity instanceof Api.Chat) {
-          // Regular group chat
-          peer = new Api.InputPeerChat({ chatId: entity.id });
-        } else if (entity instanceof Api.Channel) {
-          // Channel/supergroup
-          peer = new Api.InputPeerChannel({
-            channelId: entity.id,
-            accessHash: entity.accessHash
-          });
-        } else {
-          throw new Error("Invalid group entity");
-        }
+      if (entity instanceof Api.User) {
+        peer = new Api.InputPeerUser({
+          userId: entity.id,
+          accessHash: entity.accessHash
+        });
+      } else if (entity instanceof Api.Chat) {
+        peer = new Api.InputPeerChat({
+          chatId: entity.id
+        });
+      } else if (entity instanceof Api.Channel) {
+        peer = new Api.InputPeerChannel({
+          channelId: entity.id,
+          accessHash: entity.accessHash
+        });
       } else {
-        // Private chat
-        if (entity instanceof Api.User) {
-          peer = new Api.InputPeerUser({
-            userId: entity.id,
-            accessHash: entity.accessHash
-          });
-        } else {
-          throw new Error("Invalid user entity");
-        }
+        throw new Error("Invalid entity type");
       }
 
       await account.client.invoke(
