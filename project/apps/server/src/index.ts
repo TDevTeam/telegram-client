@@ -65,9 +65,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("sendMessage", async ({ accountId, chatId, message }) => {
+  socket.on("sendMessage", async ({ accountId, chatId, message, replyToId }) => {
     try {
-      const sentMessage = await manager.sendMessage(accountId, chatId, message);
+      const sentMessage = await manager.sendMessage(accountId, chatId, message, replyToId);
       socket.emit("messageSent", { 
         accountId, 
         chatId, 

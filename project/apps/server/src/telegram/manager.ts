@@ -490,9 +490,38 @@ export class TelegramManager extends EventEmitter {
       const chat = this.chats.get(accountId)?.get(chatId);
       if (!chat) throw new Error("Chat not found");
 
+      // Get the entity first to ensure we have the correct ID and access hash
+      const entity = await account.client.getEntity(chatId);
+      
+      let peer;
+      if (chat.isGroup) {
+        if (entity instanceof Api.Chat) {
+          // Regular group chat
+          peer = new Api.InputPeerChat({ chatId: entity.id });
+        } else if (entity instanceof Api.Channel) {
+          // Channel/supergroup
+          peer = new Api.InputPeerChannel({
+            channelId: entity.id,
+            accessHash: entity.accessHash
+          });
+        } else {
+          throw new Error("Invalid group entity");
+        }
+      } else {
+        // Private chat
+        if (entity instanceof Api.User) {
+          peer = new Api.InputPeerUser({
+            userId: entity.id,
+            accessHash: entity.accessHash
+          });
+        } else {
+          throw new Error("Invalid user entity");
+        }
+      }
+
       await account.client.invoke(
         new Api.messages.ReadHistory({
-          peer: await account.client.getInputEntity(chatId),
+          peer,
           maxId: 0, // Mark all as read up to the latest
         })
       );
@@ -511,15 +540,15 @@ export class TelegramManager extends EventEmitter {
       });
     } catch (error) {
       console.error("Failed to mark messages as read:", error);
-      // Potentially re-throw or handle specific errors (like PEER_ID_INVALID)
-      throw error; // Re-throw original error
+      throw error;
     }
   }
 
   public async sendMessage(
     accountId: string,
     chatId: string,
-    text: string
+    text: string,
+    replyTo?: string
   ): Promise<Message> {
     const account = this.accounts.get(accountId);
     if (!account) throw new Error("Account not found");
@@ -559,6 +588,7 @@ export class TelegramManager extends EventEmitter {
 
       const result = await account.client.sendMessage(chatId, {
         message: text,
+        replyTo: replyTo ? parseInt(replyTo) : undefined
       });
 
       const formattedMessage = await this.formatMessage(account.client, result);
