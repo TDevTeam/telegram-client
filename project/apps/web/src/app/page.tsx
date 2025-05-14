@@ -894,7 +894,7 @@ export default function TelegramManager() {
                         />
                       </div>
                     )}
-                    <div className="break-words">{message.text}</div>
+                    <div className="break-words whitespace-pre-wrap word-wrap leading-relaxed px-2">{message.text || ""}</div>
                     <div className="text-xs mt-1 flex justify-end items-center gap-1">
                       {message.edited && <Edit className="h-3 w-3" />}
                       {message.forwarded && <Forward className="h-3 w-3" />}
@@ -1258,76 +1258,22 @@ export default function TelegramManager() {
                       </div>
 
                       {/* Chat info and permissions */}
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="flex items-center gap-2">
-                              {cooldowns[selectedAccount]?.[selectedChat] > 0 && (
-                                <div className="flex items-center text-xs text-muted-foreground">
-                                  <Clock className="h-3 w-3 mr-1" />
-                                  {cooldowns[selectedAccount][selectedChat]}s
-                                </div>
-                              )}
-
-                              {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.permissions?.canSendMessages ===
-                                false && <Lock className="h-4 w-4 text-muted-foreground" />}
-
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                                    <MoreVertical className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => toggleMute(selectedChat)}>
-                                    {chats[selectedAccount]?.find((c) => c.id === selectedChat)?.muted ? (
-                                      <>
-                                        <BellOff className="mr-2 h-4 w-4" />
-                                        <span>Unmute Notifications</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Bell className="mr-2 h-4 w-4" />
-                                        <span>Mute Notifications</span>
-                                      </>
-                                    )}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() =>
-                                      socket?.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
-                                    }
-                                  >
-                                    Mark as Read
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {cooldowns[selectedAccount]?.[selectedChat] > 0
-                              ? `Cooldown: ${cooldowns[selectedAccount][selectedChat]} seconds remaining`
-                              : chats[selectedAccount]?.find((c) => c.id === selectedChat)?.permissions?.canSendMessages ===
-                                  false
-                                ? "You cannot send messages in this chat"
-                                : "Chat info"}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                     
                     </div>
 
                     <ScrollArea className="flex-1">
-                      <div className="p-4 space-y-4">
+                      <div className="p-4 space-y-4 w-full">
                         {messages[selectedAccount]?.[selectedChat]?.length > 0 ? (
                           groupMessagesByDate(messages[selectedAccount][selectedChat]).map(([date, dateMessages]) => (
-                            <div key={date} className="space-y-3">
-                              <div className="text-center">
+                            <div key={date} className="space-y-3 w-full">
+                              <div className="flex justify-center w-full">
                                 <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-md">{date}</span>
                               </div>
 
                               {dateMessages.map((message) => (
                                 <div
                                   key={message.id}
-                                  className={`flex ${message.isFromMe ? "justify-end" : "justify-start"}`}
+                                  className={`flex w-full ${message.isFromMe ? "justify-end" : "justify-start"}`}
                                 >
                                   <div className="relative group max-w-[75%]">
                                     {!message.isFromMe && message.sender && (
@@ -1356,7 +1302,7 @@ export default function TelegramManager() {
                                           {findMessageById(selectedAccount, selectedChat, message.replyTo)?.sender?.name ||
                                             "Reply to"}
                                         </div>
-                                        <div className="truncate">
+                                        <div className="truncate max-w-xs">
                                           {findMessageById(selectedAccount, selectedChat, message.replyTo)?.text ||
                                             "Message"}
                                         </div>
@@ -1382,7 +1328,7 @@ export default function TelegramManager() {
                                       )}
 
                                       {/* Message text */}
-                                      <div className="break-words">{message.text || ""}</div>
+                                      <div className="break-words whitespace-pre-wrap leading-relaxed">{message.text || ""}</div>
 
                                       {/* Message metadata */}
                                       <div className="text-xs mt-1 flex justify-end items-center gap-1">
@@ -1403,20 +1349,7 @@ export default function TelegramManager() {
                                       className={`absolute top-0 ${message.isFromMe ? "left-0 -translate-x-full" : "right-0 translate-x-full"} opacity-0 group-hover:opacity-100 transition-opacity`}
                                     >
                                       <div className="flex flex-col gap-1 p-1 bg-background border border-border rounded-md shadow-sm">
-                                        {!message.isFromMe && (
-                                          <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-6 w-6"
-                                            onClick={() => {
-                                              if (socket && selectedAccount && selectedChat) {
-                                                socket.emit("markAsRead", { accountId: selectedAccount, chatId: selectedChat })
-                                              }
-                                            }}
-                                          >
-                                            <CheckCheck className="h-3 w-3" />
-                                          </Button>
-                                        )}
+    
                                         <Button
                                           variant="ghost"
                                           size="icon"

@@ -490,27 +490,8 @@ export class TelegramManager extends EventEmitter {
       const chat = this.chats.get(accountId)?.get(chatId);
       if (!chat) throw new Error("Chat not found");
 
-      // Get the entity first to ensure we have the correct ID and access hash
-      const entity = await account.client.getEntity(chatId);
-      
-      let peer;
-      if (entity instanceof Api.User) {
-        peer = new Api.InputPeerUser({
-          userId: entity.id,
-          accessHash: entity.accessHash
-        });
-      } else if (entity instanceof Api.Chat) {
-        peer = new Api.InputPeerChat({
-          chatId: entity.id
-        });
-      } else if (entity instanceof Api.Channel) {
-        peer = new Api.InputPeerChannel({
-          channelId: entity.id,
-          accessHash: entity.accessHash
-        });
-      } else {
-        throw new Error("Invalid entity type");
-      }
+      // Get the input peer directly using getInputEntity
+      const peer = await account.client.getInputEntity(chatId);
 
       await account.client.invoke(
         new Api.messages.ReadHistory({
