@@ -8,6 +8,8 @@ const configSchema = z.object({
   API_ID: z.number(),
   API_HASH: z.string(),
   JWT_SECRET: z.string(),
+  BOT_TOKEN: z.string(),
+  BOT_TARGET_GROUP_ID: z.string(),
 });
 
 export const config = configSchema.parse({
@@ -15,4 +17,6 @@ export const config = configSchema.parse({
   API_ID: Number(process.env.API_ID),
   API_HASH: process.env.API_HASH,
   JWT_SECRET: process.env.JWT_SECRET,
+  BOT_TOKEN: process.env.BOT_TOKEN,
+  BOT_TARGET_GROUP_ID: process.env.BOT_TARGET_GROUP_ID,
 });

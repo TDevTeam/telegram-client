@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import { TelegramManager } from "./telegram/manager.js";
 import { FeedManager } from "./feed/manager.js";
+import { FeedBot } from "./telegram/bot.js";
 import { config } from "./config.js";
 
 const app = express();
@@ -28,6 +29,7 @@ app.use(express.json());
 
 const manager = new TelegramManager();
 const feedManager = new FeedManager();
+const bot = new FeedBot(manager, config.BOT_TOKEN, config.BOT_TARGET_GROUP_ID);
 
 // Set up real-time event handlers
 manager.on('newMessage', async (data) => {
@@ -38,6 +40,26 @@ manager.on('newMessage', async (data) => {
     const feedMessage = await feedManager.addMessage(data.accountId, data.chatId, data.message);
     if (feedMessage) {
       io.emit('feedUpdate', feedMessage);
+      
+      // Get chat information
+      const chats = manager.getChats(data.accountId);
+      const chat = Array.isArray(chats) ? chats.find(c => c.id === data.chatId) : chats.get(data.chatId);
+      const chatTitle = chat?.title || 'Unknown Chat';
+      
+      // Send the feed message to the Telegram group
+      await bot.sendFeedMessage({
+        id: feedMessage.id,
+        messageId: feedMessage.message.id,
+        text: feedMessage.message.text,
+        timestamp: feedMessage.timestamp,
+        accountId: feedMessage.accountId,
+        chatId: feedMessage.chatId,
+        sender: {
+          id: feedMessage.message.sender?.id || '',
+          name: feedMessage.message.sender?.name || 'Unknown',
+          chatTitle: chatTitle
+        }
+      });
     }
   }
 });
@@ -131,6 +153,16 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("Client disconnected");
+  });
+});
+
+// Cleanup on server shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received. Cleaning up...');
+  bot.stop();
+  httpServer.close(() => {
+    console.log('Server closed');
+    process.exit(0);
   });
 });
 
