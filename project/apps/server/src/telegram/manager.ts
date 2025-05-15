@@ -4,6 +4,8 @@ import { NewMessage } from "telegram/events/index.js";
 import { config } from "../config.js";
 import { EventEmitter } from "node:events";
 import JSBI from "jsbi";
+import fs from 'fs/promises';
+import path from 'path';
 
 interface Account {
   id: string;
@@ -73,16 +75,10 @@ export class TelegramManager extends EventEmitter {
 
   private async loadAccounts() {
     try {
-      const accounts = [
-        {
-          token:
-            "1BAAOMTQ5LjE1NC4xNjcuOTEBuyXE1/pXWSLnG/eVXksgCdYwG+tFzbP2ZN2W9GU5evd97dImoU+oAZEexlc4fsIExxPssFwDxLltkO6fPNeObrmatv6BJyvqVDSdvgvyDqn4INDbVdb7Fn2W0c0gHX4pLY8qsfTFSJBJgQr+eQiotA8goa2fLxN88GmPC753VMDVuFAdwFqkl/B05r51AQ7ooToJGOZtsxRhDioxIHbu88cJKLaZCoyplqZc1Om8HtilgoOJpYw1Z51sWhHqARZ2guUXe5qaRLUN9GZV7NtZbGWgI38N0DN9P0oT7LDJ3xACcCFXAvHRVsXmmn9LBEkDWrUD194U4ZDGZapLfYneElQ=",
-        },
-        {
-          token:
-            "1BAAOMTQ5LjE1NC4xNjcuOTEBu8Gz84boKViaq7QQHkBB3QtcH9+/iyLn5qVjovEuZlmyMJGtZL1+9jICYtv/mTyXd/cXYihIYqSR6YFS1wDsQF0rGATvzagb2OcM4hEkgTTQv2AO+rgJeHt9wjpeopBnN32WjZ4ToeUtaZ/pDopEyLhC+1fhq7WxM1GItb5HVw+MbZ9dM4cWiZXjHXoVQspSkbhtVJcGKmfLN+ZAHFTPxlvSoYBSXIevntt71BpKQYAwWDwdij8pG8NBijwy1dxQ2ioOZ4fztGxs8wV8RCqE2PnJLGIOwWxhzuZ1kQVfUDsqb7jgMftWHIWT6Sq9noNhuPg8EzMDtM6U3eHfi1ImNMA=",
-        },
-      ];
+      const accountsPath = path.join(process.cwd(), 'data', 'accounts.json');
+      const data = await fs.readFile(accountsPath, 'utf-8');
+      const { accounts } = JSON.parse(data);
+      
       for (const account of accounts) {
         await this.addAccount(account);
       }
