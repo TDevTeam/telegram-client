@@ -153,7 +153,7 @@ export default function TelegramManager() {
   // Connect to socket
   useEffect(() => {
     console.log("Connecting to socket server...")
-    const socketInstance = io("http://localhost:3001", {
+    const socketInstance = io("https://telegrambackend.telemaxi.xyz", {
       path: "/socket.io/",
       transports: ["websocket", "polling"],
       withCredentials: true,
